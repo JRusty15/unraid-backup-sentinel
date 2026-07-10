@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unraid Backup & Log Sentinel</title>
+    <meta name="description" content="AI-powered dashboard for monitoring Unraid local and offsite backups and system syslog health.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- CSS Stylesheet -->
+    <link rel="stylesheet" href="style.css">
+    <!-- Marked JS for AI markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="glow-orb" id="orb-1"></div>
+    <div class="glow-orb" id="orb-2"></div>
+
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <i class="fa-solid fa-shield-halved brand-logo"></i>
+                <div class="brand-text">
+                    <h1>Sentinel</h1>
+                    <span>Unraid AI Node</span>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <button class="nav-item active" id="btn-nav-dashboard" onclick="switchTab('dashboard')">
+                    <i class="fa-solid fa-chart-pie"></i> Dashboard
+                </button>
+                <button class="nav-item" id="btn-nav-syslog" onclick="switchTab('syslog')">
+                    <i class="fa-solid fa-server"></i> Logs & Syslog
+                </button>
+                <button class="nav-item" id="btn-nav-tokens" onclick="switchTab('tokens')">
+                    <i class="fa-solid fa-coins"></i> Gemini Cost Tracker
+                </button>
+            </nav>
+            <div class="server-status-card">
+                <div class="status-pulse-dot ok"></div>
+                <div class="status-meta">
+                    <p class="status-label">SYS Health</p>
+                    <span class="status-val" id="system-overall-health">Active & Healthy</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Top bar -->
+            <header class="top-bar">
+                <div class="welcome-text">
+                    <h2 id="page-title">Operational Overview</h2>
+                    <p id="page-subtitle">Real-time status of backups and storage array integrity.</p>
+                </div>
+                <div class="actions-group">
+                    <button class="btn btn-secondary" id="btn-refresh" onclick="refreshData()">
+                        <i class="fa-solid fa-rotate"></i> Sync Data
+                    </button>
+                    <button class="btn btn-primary" id="btn-analyze" onclick="triggerAIAnalysis()">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> AI Analysis
+                    </button>
+                </div>
+            </header>
+
+            <!-- Dashboard Tab -->
+            <section class="tab-pane active" id="tab-dashboard">
+                <!-- Backup Circles Summary Grid -->
+                <div class="backups-grid">
+                    <!-- Local Rsync Backup -->
+                    <div class="card status-card" id="card-local-backup">
+                        <div class="card-header">
+                            <h3>Local Rsync Backup</h3>
+                            <span class="badge" id="badge-local-status">unknown</span>
+                        </div>
+                        <div class="card-body status-body">
+                            <div class="ring-container">
+                                <svg class="status-ring" viewBox="0 0 120 120">
+                                    <circle class="ring-bg" cx="60" cy="60" r="50" />
+                                    <circle class="ring-fg" id="ring-local-fg" cx="60" cy="60" r="50" />
+                                </svg>
+                                <div class="ring-inner">
+                                    <i class="fa-solid fa-server status-icon" id="icon-local-status"></i>
+                                </div>
+                            </div>
+                            <div class="status-details">
+                                <p class="timestamp-label">Last Successful Run</p>
+                                <p class="timestamp-value" id="local-last-run">-</p>
+                                <p class="message-value" id="local-message">Waiting for reports...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Offsite Duplicacy Backup -->
+                    <div class="card status-card" id="card-offsite-backup">
+                        <div class="card-header">
+                            <h3>Offsite Duplicacy</h3>
+                            <span class="badge" id="badge-offsite-status">unknown</span>
+                        </div>
+                        <div class="card-body status-body">
+                            <div class="ring-container">
+                                <svg class="status-ring" viewBox="0 0 120 120">
+                                    <circle class="ring-bg" cx="60" cy="60" r="50" />
+                                    <circle class="ring-fg" id="ring-offsite-fg" cx="60" cy="60" r="50" />
+                                </svg>
+                                <div class="ring-inner">
+                                    <i class="fa-solid fa-cloud-arrow-up status-icon" id="icon-offsite-status"></i>
+                                </div>
+                            </div>
+                            <div class="status-details">
+                                <p class="timestamp-label">Last Successful Run</p>
+                                <p class="timestamp-value" id="offsite-last-run">-</p>
+                                <p class="message-value" id="offsite-message">Waiting for reports...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Sentinel Insights Area -->
+                <div class="card ai-card">
+                    <div class="card-header ai-header">
+                        <div class="ai-title-block">
+                            <i class="fa-solid fa-brain ai-logo"></i>
+                            <div>
+                                <h3>AI Sentinel Diagnostics</h3>
+                                <p class="meta-text" id="ai-last-run">Last updated: -</p>
+                            </div>
+                        </div>
+                        <span class="ai-badge" id="ai-health-status">Unknown</span>
+                    </div>
+                    <div class="card-body ai-body">
+                        <!-- Spinner for loading state -->
+                        <div class="spinner-container" id="ai-loading" style="display: none;">
+                            <div class="loading-spinner"></div>
+                            <p>Gemini is scanning syslogs & backup logs...</p>
+                        </div>
+                        <!-- Markdown text injected here -->
+                        <div class="markdown-content" id="ai-markdown-content">
+                            <p>Trigger an AI analysis or wait for the daily scheduled job to view system insights.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Logs / Syslog View Tab -->
+            <section class="tab-pane" id="tab-syslog">
+                <div class="card log-card">
+                    <div class="card-header">
+                        <h3>Raw Logs Inspector</h3>
+                        <div class="log-controls">
+                            <select id="log-selector" onchange="loadRawLogs()">
+                                <option value="syslog">Unraid Syslog (24h)</option>
+                                <option value="duplicacy">Duplicacy Backup Logs</option>
+                                <option value="rsync">Local Rsync Logs</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="card-body log-body">
+                        <pre class="log-terminal" id="log-terminal-output">Select a log source to inspect...</pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Gemini Cost / API Tracker Tab -->
+            <section class="tab-pane" id="tab-tokens">
+                <div class="cost-grid">
+                    <!-- Total Spend Card -->
+                    <div class="card cost-summary-card">
+                        <div class="cost-header">
+                            <i class="fa-solid fa-wallet"></i>
+                            <h4>Total API Spend</h4>
+                        </div>
+                        <div class="cost-value" id="cost-total-spend">$0.00</div>
+                        <p class="cost-meta">Calculated using Gemini 1.5 Flash rates</p>
+                    </div>
+
+                    <!-- Token Consumption Card -->
+                    <div class="card cost-summary-card">
+                        <div class="cost-header">
+                            <i class="fa-solid fa-gauge-high"></i>
+                            <h4>Tokens Used</h4>
+                        </div>
+                        <div class="token-counters">
+                            <div class="counter">
+                                <span class="label">Input (Prompt)</span>
+                                <span class="val" id="tokens-input">0</span>
+                            </div>
+                            <div class="counter border-left">
+                                <span class="label">Output (Response)</span>
+                                <span class="val" id="tokens-output">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API Log Table -->
+                <div class="card table-card">
+                    <div class="card-header">
+                        <h3>Token Usage Logs</h3>
+                    </div>
+                    <div class="card-body table-body">
+                        <table class="data-table" id="usage-table">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Operation</th>
+                                    <th>Prompt Tokens</th>
+                                    <th>Response Tokens</th>
+                                    <th>Estimated Cost</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usage-table-body">
+                                <tr>
+                                    <td colspan="5" style="text-align: center;">No token usage recorded.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- JavaScript File -->
+    <script src="app.js"></script>
+</body>
+</html>

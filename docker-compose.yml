@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  sentinel:
+    build: .
+    container_name: unraid-backup-sentinel
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE
+      - LOG_DIR_SYSLOG=/app/logs/syslog
+      - LOG_DIR_DUPLICACY=/app/logs/duplicacy
+      - LOG_DIR_RSYNC=/app/logs/rsync
+      - HEARTBEAT_RSYNC_HOURS=26
+      - HEARTBEAT_DUPLICACY_HOURS=26
+      - DB_PATH=/app/backend/sentinel.db
+    volumes:
+      # --- UNRAID CONFIGURATION (Uncomment these on your Unraid Server) ---
+      # - /var/log:/app/logs/syslog:ro
+      # - /mnt/user/appdata/duplicacy/logs:/app/logs/duplicacy:ro
+      # - /mnt/user/appdata/unraid-backup-sentinel/logs:/app/logs/rsync:ro
+      # - /mnt/user/appdata/unraid-backup-sentinel/data:/app/backend
+      
+      # --- LOCAL DEVELOPMENT & TESTING CONFIGURATION ---
+      # For testing on your local machine, we mount simulated log directories
+      - ./mock_logs/syslog:/app/logs/syslog:ro
+      - ./mock_logs/duplicacy:/app/logs/duplicacy:ro
+      - ./mock_logs/rsync:/app/logs/rsync:ro
+      # Persist DB locally in backend folder
+      - ./backend:/app/backend:rw

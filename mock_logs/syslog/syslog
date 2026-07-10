@@ -1,0 +1,6 @@
+Jul  9 08:00:00 Tower kernel: Command line: BOOT_IMAGE=/bzimage initrd=/bzroot
+Jul  9 10:15:22 Tower kernel: mdcmd (37): spinup 0
+Jul  9 12:30:45 Tower kernel: btrfs: device fsid 12345678-abcd-1234-abcd-1234567890ab devid 1 transid 50100 /dev/sdc1
+Jul  9 14:22:11 Tower emhttpd: spinning down drives...
+Jul  9 17:05:10 Tower kernel: btrfs: error (device sdc1) in btrfs_run_delayed_refs:2145: errno=-5 IO failure
+Jul  9 19:10:00 Tower kernel: md: recovery thread: parity sync completed!
