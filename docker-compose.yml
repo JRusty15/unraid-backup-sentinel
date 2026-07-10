@@ -14,13 +14,13 @@ services:
       - LOG_DIR_RSYNC=/app/logs/rsync
       - HEARTBEAT_RSYNC_HOURS=26
       - HEARTBEAT_DUPLICACY_HOURS=26
-      - DB_PATH=/app/backend/sentinel.db
+      - DB_PATH=/app/data/sentinel.db
     volumes:
       # --- UNRAID CONFIGURATION (Uncomment these on your Unraid Server) ---
       # - /var/log:/app/logs/syslog:ro
       # - /mnt/user/appdata/duplicacy/logs:/app/logs/duplicacy:ro
       # - /mnt/user/appdata/unraid-backup-sentinel/logs:/app/logs/rsync:ro
-      # - /mnt/user/appdata/unraid-backup-sentinel/data:/app/backend
+      # - /mnt/user/appdata/unraid-backup-sentinel/data:/app/data
       
       # --- LOCAL DEVELOPMENT & TESTING CONFIGURATION ---
       # For testing on your local machine, we mount simulated log directories
@@ -28,4 +28,4 @@ services:
       - ./mock_logs/duplicacy:/app/logs/duplicacy:ro
       - ./mock_logs/rsync:/app/logs/rsync:ro
       # Persist DB locally in backend folder
-      - ./backend:/app/backend:rw
+      - ./backend:/app/data:rw

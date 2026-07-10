@@ -83,14 +83,14 @@ services:
       - LOG_DIR_RSYNC=/app/logs/rsync
       - HEARTBEAT_RSYNC_HOURS=26
       - HEARTBEAT_DUPLICACY_HOURS=26
-      - DB_PATH=/app/backend/sentinel.db
+      - DB_PATH=/app/data/sentinel.db
     volumes:
       # Bind-mount host files for read-only log auditing
       - /var/log:/app/logs/syslog:ro
       - /mnt/user/appdata/duplicacy/logs:/app/logs/duplicacy:ro
       - /mnt/user/appdata/unraid-backup-sentinel/logs:/app/logs/rsync:ro
       # Persist the internal dashboard state/DB on your array/appdata cache
-      - /mnt/user/appdata/unraid-backup-sentinel/data:/app/backend
+      - /mnt/user/appdata/unraid-backup-sentinel/data:/app/data
 ```
 
 Run the compose project on Unraid, and the server will run using the compiled image.

@@ -21,11 +21,12 @@ COPY frontend/ /app/frontend/
 WORKDIR /app/backend
 
 # Create environment variable defaults
+RUN mkdir -p /app/data
 ENV PORT=8080
 ENV LOG_DIR_SYSLOG=/app/logs/syslog
 ENV LOG_DIR_DUPLICACY=/app/logs/duplicacy
 ENV LOG_DIR_RSYNC=/app/logs/rsync
-ENV DB_PATH=/app/backend/sentinel.db
+ENV DB_PATH=/app/data/sentinel.db
 
 EXPOSE 8080
 
