@@ -72,54 +72,8 @@
             <!-- Dashboard Tab -->
             <section class="tab-pane active" id="tab-dashboard">
                 <!-- Backup Circles Summary Grid -->
-                <div class="backups-grid">
-                    <!-- Local Rsync Backup -->
-                    <div class="card status-card" id="card-local-backup">
-                        <div class="card-header">
-                            <h3>Local Rsync Backup</h3>
-                            <span class="badge" id="badge-local-status">unknown</span>
-                        </div>
-                        <div class="card-body status-body">
-                            <div class="ring-container">
-                                <svg class="status-ring" viewBox="0 0 120 120">
-                                    <circle class="ring-bg" cx="60" cy="60" r="50" />
-                                    <circle class="ring-fg" id="ring-local-fg" cx="60" cy="60" r="50" />
-                                </svg>
-                                <div class="ring-inner">
-                                    <i class="fa-solid fa-server status-icon" id="icon-local-status"></i>
-                                </div>
-                            </div>
-                            <div class="status-details">
-                                <p class="timestamp-label">Last Successful Run</p>
-                                <p class="timestamp-value" id="local-last-run">-</p>
-                                <p class="message-value" id="local-message">Waiting for reports...</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Offsite Duplicacy Backup -->
-                    <div class="card status-card" id="card-offsite-backup">
-                        <div class="card-header">
-                            <h3>Offsite Duplicacy</h3>
-                            <span class="badge" id="badge-offsite-status">unknown</span>
-                        </div>
-                        <div class="card-body status-body">
-                            <div class="ring-container">
-                                <svg class="status-ring" viewBox="0 0 120 120">
-                                    <circle class="ring-bg" cx="60" cy="60" r="50" />
-                                    <circle class="ring-fg" id="ring-offsite-fg" cx="60" cy="60" r="50" />
-                                </svg>
-                                <div class="ring-inner">
-                                    <i class="fa-solid fa-cloud-arrow-up status-icon" id="icon-offsite-status"></i>
-                                </div>
-                            </div>
-                            <div class="status-details">
-                                <p class="timestamp-label">Last Successful Run</p>
-                                <p class="timestamp-value" id="offsite-last-run">-</p>
-                                <p class="message-value" id="offsite-message">Waiting for reports...</p>
-                            </div>
-                        </div>
-                    </div>
+                <div class="backups-grid" id="backups-container">
+                    <p class="meta-text" style="grid-column: 1 / -1; text-align: center; padding: 2rem;">Loading backup status cards...</p>
                 </div>
 
                 <!-- AI Sentinel Insights Area -->

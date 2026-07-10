@@ -403,9 +403,6 @@ async def start_background_loop():
 # API Endpoints
 @app.post("/api/report")
 def receive_report(report: BackupReport):
-    if report.id not in ["local_rsync", "offsite_duplicacy"]:
-        raise HTTPException(status_code=400, detail="Invalid backup ID. Use 'local_rsync' or 'offsite_duplicacy'.")
-        
     if report.status not in ["success", "failed", "warning"]:
         raise HTTPException(status_code=400, detail="Invalid status. Use 'success', 'failed', or 'warning'.")
         

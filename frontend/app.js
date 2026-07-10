@@ -52,6 +52,24 @@ async function refreshDashboardData() {
     ]);
 }
 
+// Helper to escape HTML characters
+function escapeHtml(unsafe) {
+    if (!unsafe) return "";
+    return unsafe
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+}
+
+// Helper to format ID to display title
+function formatBackupId(id) {
+    return id
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+}
+
 // Load Backup Statuses
 async function loadBackupStatuses() {
     try {
@@ -59,51 +77,75 @@ async function loadBackupStatuses() {
         if (!res.ok) throw new Error('Failed to fetch backup statuses');
         const data = await res.json();
         
+        const container = document.getElementById('backups-container');
+        container.innerHTML = '';
+        
+        if (data.length === 0) {
+            container.innerHTML = '<p class="meta-text" style="grid-column: 1 / -1; text-align: center; padding: 2rem;">No backups registered yet.</p>';
+            return;
+        }
+
         let systemHealth = 'healthy';
         
         data.forEach(backup => {
-            const id = backup.id; // local_rsync or offsite_duplicacy
+            const id = backup.id;
             const status = backup.status.toLowerCase();
             const lastRun = backup.last_run;
             const message = backup.message || 'No message provided.';
             
-            // Set elements
-            const badge = document.getElementById(`badge-${id === 'local_rsync' ? 'local' : 'offsite'}-status`);
-            const ring = document.getElementById(`ring-${id === 'local_rsync' ? 'local' : 'offsite'}-fg`);
-            const dateVal = document.getElementById(`${id === 'local_rsync' ? 'local' : 'offsite'}-last-run`);
-            const msgVal = document.getElementById(`${id === 'local_rsync' ? 'local' : 'offsite'}-message`);
-            const icon = document.getElementById(`icon-${id === 'local_rsync' ? 'local' : 'offsite'}-status`);
+            // Choose icons and colors
+            let iconClass = 'fa-solid fa-server';
+            let iconColor = 'var(--text-secondary)';
             
-            // Update Text
-            badge.textContent = status;
-            badge.className = `badge ${status}`;
-            msgVal.textContent = message;
-            dateVal.textContent = formatDate(lastRun);
-            
-            // Update ring SVG
-            ring.className.baseVal = `ring-fg ${status}`;
-            
-            // Circumference is 314. Full ring represents 100% completion.
-            // Green/Success -> Full ring. Failed/Stale -> Full ring (with red/blue style). Unknown -> 0.
-            if (status === 'unknown') {
-                ring.style.strokeDashoffset = '314'; // empty
+            if (id.toLowerCase().includes('rsync')) {
+                iconClass = 'fa-solid fa-server';
+            } else if (id.toLowerCase().includes('duplicacy') || id.toLowerCase().includes('offsite')) {
+                iconClass = 'fa-solid fa-cloud-arrow-up';
             } else {
-                ring.style.strokeDashoffset = '0'; // full
+                iconClass = 'fa-solid fa-box-archive';
             }
-            
-            // Update icons based on status
+
             if (status === 'success') {
-                icon.className = `fa-solid ${id === 'local_rsync' ? 'fa-server' : 'fa-cloud-arrow-up'} status-icon`;
-                icon.style.color = 'var(--color-success)';
+                iconColor = 'var(--color-success)';
             } else if (status === 'failed') {
-                icon.className = 'fa-solid fa-triangle-exclamation status-icon';
-                icon.style.color = 'var(--color-failed)';
+                iconClass = 'fa-solid fa-triangle-exclamation';
+                iconColor = 'var(--color-failed)';
                 systemHealth = 'critical';
             } else if (status === 'warning' || status === 'stale') {
-                icon.className = 'fa-solid fa-circle-exclamation status-icon';
-                icon.style.color = status === 'warning' ? 'var(--color-warning)' : 'var(--color-stale)';
+                iconClass = 'fa-solid fa-circle-exclamation';
+                iconColor = status === 'warning' ? 'var(--color-warning)' : 'var(--color-stale)';
                 if (systemHealth !== 'critical') systemHealth = 'warning';
             }
+
+            const offset = (status === 'unknown') ? '314' : '0';
+            const displayTitle = formatBackupId(id);
+
+            const card = document.createElement('div');
+            card.className = 'card status-card';
+            card.id = `card-${id}`;
+            card.innerHTML = `
+                <div class="card-header">
+                    <h3>${escapeHtml(displayTitle)}</h3>
+                    <span class="badge ${status}">${escapeHtml(status)}</span>
+                </div>
+                <div class="card-body status-body">
+                    <div class="ring-container">
+                        <svg class="status-ring" viewBox="0 0 120 120">
+                            <circle class="ring-bg" cx="60" cy="60" r="50" />
+                            <circle class="ring-fg ${status}" id="ring-${id}-fg" cx="60" cy="60" r="50" style="stroke-dashoffset: ${offset};" />
+                        </svg>
+                        <div class="ring-inner">
+                            <i class="${iconClass} status-icon" id="icon-${id}-status" style="color: ${iconColor};"></i>
+                        </div>
+                    </div>
+                    <div class="status-details">
+                        <p class="timestamp-label">Last Run</p>
+                        <p class="timestamp-value" id="${id}-last-run">${formatDate(lastRun)}</p>
+                        <p class="message-value" id="${id}-message" title="${escapeHtml(message)}">${escapeHtml(message)}</p>
+                    </div>
+                </div>
+            `;
+            container.appendChild(card);
         });
         
         // Update overall system status indicator
