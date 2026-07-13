@@ -41,6 +41,10 @@ function switchTab(tabId) {
         titleEl.textContent = 'Gemini Cost & Usage';
         subtitleEl.textContent = 'Financial auditing and token counts of AI engine operations.';
         loadCostUsageData();
+    } else if (tabId === 'settings') {
+        titleEl.textContent = 'System Settings';
+        subtitleEl.textContent = 'Integration aids and database maintenance controls.';
+        loadSettingsData();
     }
 }
 
@@ -334,6 +338,8 @@ function refreshData() {
             await loadRawLogs();
         } else if (currentTab === 'tokens') {
             await loadCostUsageData();
+        } else if (currentTab === 'settings') {
+            loadSettingsData();
         }
         btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Sync Data';
     }, 500);
@@ -360,6 +366,37 @@ function formatDate(isoStr) {
         return date.toLocaleString();
     } catch (err) {
         return isoStr;
+    }
+}
+
+// Load Settings Data
+function loadSettingsData() {
+    const host = window.location.hostname || 'YOUR_SERVER_IP';
+    const port = window.location.port || '8080';
+    document.getElementById('settings-host-ip').textContent = host;
+    document.getElementById('settings-host-port').textContent = port;
+}
+
+// Reset Database API Call
+async function resetAppDatabase() {
+    const check = confirm("DANGER: Are you sure you want to completely clear the Sentinel database? This deletes all backup status records, log history, and cost stats. This cannot be undone.");
+    if (!check) return;
+    
+    const btn = document.getElementById('btn-reset-db');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Clearing Database...';
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/reset`, { method: 'POST' });
+        if (!res.ok) throw new Error('API request failed');
+        const data = await res.json();
+        
+        alert("Database reset successfully! All status cards and history logs have been cleared.");
+        switchTab('dashboard');
+    } catch (err) {
+        alert("Failed to reset database: " + err.message);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-trash-can"></i> Clear Database';
     }
 }
 

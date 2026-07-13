@@ -41,6 +41,9 @@
                 <button class="nav-item" id="btn-nav-tokens" onclick="switchTab('tokens')">
                     <i class="fa-solid fa-coins"></i> Gemini Cost Tracker
                 </button>
+                <button class="nav-item" id="btn-nav-settings" onclick="switchTab('settings')">
+                    <i class="fa-solid fa-gears"></i> Settings
+                </button>
             </nav>
             <div class="server-status-card">
                 <div class="status-pulse-dot ok"></div>
@@ -175,6 +178,39 @@
                                 </tr>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings / Debug Tab -->
+            <section class="tab-pane" id="tab-settings">
+                <div class="card settings-card" style="margin-bottom: 2rem;">
+                    <div class="card-header">
+                        <h3>Integration Helper</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="settings-section" style="margin-bottom: 2rem;">
+                            <h4 style="margin-bottom: 0.5rem; font-family: var(--font-heading);">Webhook Endpoint URL</h4>
+                            <p class="meta-text" style="margin-bottom: 1rem;">Send POST requests to this URL from your backup scripts to report backup status.</p>
+                            <div class="log-terminal" style="font-family: var(--font-mono); font-size: 0.9rem; padding: 1rem; color: hsl(200, 80%, 75%); overflow-x: auto; white-space: nowrap; height: auto;">
+                                curl -X POST -H "Content-Type: application/json" -d '{"id": "backup_id", "status": "success", "message": "Done"}' http://<span id="settings-host-ip">YOUR_SERVER_IP</span>:<span id="settings-host-port">PORT</span>/api/report
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card settings-card danger-zone-card" style="border-color: var(--color-failed-glow);">
+                    <div class="card-header">
+                        <h3 style="color: var(--color-failed);"><i class="fa-solid fa-triangle-exclamation"></i> Danger Zone</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="settings-section">
+                            <h4 style="margin-bottom: 0.5rem; font-family: var(--font-heading);">Reset Application Database</h4>
+                            <p class="meta-text" style="margin-bottom: 1.5rem;">Deletes all backup status logs, AI Sentinel diagnostics reports, and cost logs. This is irreversible.</p>
+                            <button class="btn" id="btn-reset-db" onclick="resetAppDatabase()" style="background-color: hsla(355, 85%, 55%, 0.12); border-color: var(--color-failed); color: var(--color-failed);">
+                                <i class="fa-solid fa-trash-can"></i> Clear Database
+                            </button>
+                        </div>
                     </div>
                 </div>
             </section>

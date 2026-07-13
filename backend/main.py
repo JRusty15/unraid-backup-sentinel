@@ -102,7 +102,7 @@ def init_db():
         """)
         
         # Populate initial empty states if they don't exist
-        for backup_id in ["local_rsync", "offsite_duplicacy"]:
+        for backup_id in ["local_rsync"]:
             cursor = conn.execute("SELECT 1 FROM backups WHERE id = ?", (backup_id,))
             if not cursor.fetchone():
                 conn.execute(
@@ -516,6 +516,21 @@ def get_usage():
         "monthly": monthly,
         "recent": recent
     }
+
+@app.post("/api/reset")
+def reset_database():
+    try:
+        with get_db() as conn:
+            conn.execute("DELETE FROM backups")
+            conn.execute("DELETE FROM analysis_history")
+            conn.execute("DELETE FROM api_usage")
+            conn.commit()
+        init_db()
+        logger.info("Database reset triggered via API.")
+        return {"message": "Database reset successfully."}
+    except Exception as e:
+        logger.error("Failed to reset database: %s", e)
+        raise HTTPException(status_code=500, detail=f"Database reset failed: {str(e)}")
 
 # Start the background task scheduler upon startup
 @app.on_event("startup")
