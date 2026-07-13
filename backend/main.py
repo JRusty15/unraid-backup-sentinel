@@ -188,28 +188,45 @@ def get_duplicacy_recent_logs() -> str:
         return "Duplicacy log directory not found."
         
     try:
+        # Check if a 'backup' subdirectory exists (standard for Duplicacy Web Edition detailed run logs)
+        search_dir = LOG_DIR_DUPLICACY
+        backup_sub = os.path.join(LOG_DIR_DUPLICACY, "backup")
+        if os.path.exists(backup_sub) and os.path.isdir(backup_sub):
+            search_dir = backup_sub
+            
         log_files = []
-        for f in os.listdir(LOG_DIR_DUPLICACY):
-            full_path = os.path.join(LOG_DIR_DUPLICACY, f)
+        for f in os.listdir(search_dir):
+            full_path = os.path.join(search_dir, f)
             if os.path.isfile(full_path) and f.endswith(".log"):
                 log_files.append((full_path, os.path.getmtime(full_path)))
                 
+        # Fall back to root directory if no files are found in backup subfolder
+        if not log_files and search_dir != LOG_DIR_DUPLICACY:
+            search_dir = LOG_DIR_DUPLICACY
+            for f in os.listdir(search_dir):
+                full_path = os.path.join(search_dir, f)
+                if os.path.isfile(full_path) and f.endswith(".log"):
+                    log_files.append((full_path, os.path.getmtime(full_path)))
+
         if not log_files:
             return "No Duplicacy log files found."
             
         # Sort by modification time descending
         log_files.sort(key=lambda x: x[1], reverse=True)
         
-        # Read the latest log file
-        latest_file_path = log_files[0][0]
-        logger.info("Reading latest Duplicacy log: %s", latest_file_path)
-        
-        with open(latest_file_path, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
-            # Truncate content to avoid excessive token counts (limit to 30k chars)
-            if len(content) > 30000:
-                content = "[TRUNCATED...]\n" + content[-30000:]
-            return f"--- File: {os.path.basename(latest_file_path)} ---\n{content}"
+        # Read the latest 3 log files to capture multiple parallel/sequential backup jobs
+        recent_logs_content = []
+        for i in range(min(3, len(log_files))):
+            file_path = log_files[i][0]
+            logger.info("Reading Duplicacy log: %s", file_path)
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+                # Truncate each content to 15k chars to fit context nicely
+                if len(content) > 15000:
+                    content = "[TRUNCATED...]\n" + content[-15000:]
+                recent_logs_content.append(f"--- File: {os.path.basename(file_path)} ---\n{content}")
+                
+        return "\n\n".join(recent_logs_content)
     except Exception as e:
         logger.error("Error reading Duplicacy logs: %s", e)
         return f"Error reading Duplicacy logs: {str(e)}"
