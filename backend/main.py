@@ -22,6 +22,7 @@ logger = logging.getLogger("sentinel")
 # Configuration Constants
 DB_PATH = os.getenv("DB_PATH", "sentinel.db")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 LOG_DIR_SYSLOG = os.getenv("LOG_DIR_SYSLOG", "/app/logs/syslog")
 LOG_DIR_DUPLICACY = os.getenv("LOG_DIR_DUPLICACY", "/app/logs/duplicacy")
 LOG_DIR_RSYNC = os.getenv("LOG_DIR_RSYNC", "/app/logs/rsync")
@@ -329,9 +330,9 @@ async def run_log_analysis():
         Bullet points of exact fixes if any warnings or errors are found. Keep it action-oriented.
         """
         
-        # Call Gemini 1.5 Flash
+        # Call Gemini model
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model=GEMINI_MODEL,
             contents=prompt,
         )
         
