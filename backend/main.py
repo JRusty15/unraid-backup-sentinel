@@ -53,6 +53,7 @@ class BackupReport(BaseModel):
     id: str  # e.g., 'local_rsync', 'offsite_duplicacy'
     status: str  # 'success', 'failed', 'warning'
     message: Optional[str] = ""
+    heartbeat_hours: Optional[int] = None
 
 # Database helper functions
 def get_db():
@@ -67,9 +68,17 @@ def init_db():
                 id TEXT PRIMARY KEY,
                 status TEXT NOT NULL,
                 last_run TEXT NOT NULL,
-                message TEXT
+                message TEXT,
+                heartbeat_hours INTEGER
             )
         """)
+        
+        # Migration for existing databases: add heartbeat_hours column
+        try:
+            conn.execute("ALTER TABLE backups ADD COLUMN heartbeat_hours INTEGER")
+        except sqlite3.OperationalError:
+            pass # Column already exists
+            
         conn.execute("""
             CREATE TABLE IF NOT EXISTS analysis_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,8 +106,8 @@ def init_db():
             cursor = conn.execute("SELECT 1 FROM backups WHERE id = ?", (backup_id,))
             if not cursor.fetchone():
                 conn.execute(
-                    "INSERT INTO backups (id, status, last_run, message) VALUES (?, ?, ?, ?)",
-                    (backup_id, "unknown", datetime.datetime.now().isoformat(), "No backup reports received yet.")
+                    "INSERT INTO backups (id, status, last_run, message, heartbeat_hours) VALUES (?, ?, ?, ?, ?)",
+                    (backup_id, "unknown", datetime.datetime.now().isoformat(), "No backup reports received yet.", None)
                 )
         conn.commit()
     logger.info("Database initialized successfully.")
@@ -409,9 +418,16 @@ def receive_report(report: BackupReport):
     timestamp = datetime.datetime.now().isoformat()
     
     with get_db() as conn:
+        # Fetch existing record to check heartbeat_hours
+        cursor = conn.execute("SELECT heartbeat_hours FROM backups WHERE id = ?", (report.id,))
+        row = cursor.fetchone()
+        existing_heartbeat = row["heartbeat_hours"] if row else None
+        
+        heartbeat_to_save = report.heartbeat_hours if report.heartbeat_hours is not None else existing_heartbeat
+        
         conn.execute(
-            "INSERT OR REPLACE INTO backups (id, status, last_run, message) VALUES (?, ?, ?, ?)",
-            (report.id, report.status, timestamp, report.message)
+            "INSERT OR REPLACE INTO backups (id, status, last_run, message, heartbeat_hours) VALUES (?, ?, ?, ?, ?)",
+            (report.id, report.status, timestamp, report.message, heartbeat_to_save)
         )
         conn.commit()
         
@@ -426,14 +442,18 @@ def get_status():
         
     # Check if any backup status should be considered stale
     for b in backups:
-        if b["id"] == "local_rsync":
-            is_stale = check_stale_status(b["last_run"], HEARTBEAT_RSYNC_HOURS)
-        else:
-            is_stale = check_stale_status(b["last_run"], HEARTBEAT_DUPLICACY_HOURS)
-            
+        # Determine which heartbeat to use (record level first, then env level default)
+        hb_hours = b.get("heartbeat_hours")
+        if hb_hours is None:
+            if b["id"] == "local_rsync":
+                hb_hours = HEARTBEAT_RSYNC_HOURS
+            else:
+                hb_hours = HEARTBEAT_DUPLICACY_HOURS
+                
+        is_stale = check_stale_status(b["last_run"], hb_hours)
         if is_stale and b["status"] != "failed":
             b["status"] = "stale"
-            b["message"] = f"Warning: No backup reports received in the last {HEARTBEAT_RSYNC_HOURS if b['id'] == 'local_rsync' else HEARTBEAT_DUPLICACY_HOURS} hours."
+            b["message"] = f"Warning: No backup reports received in the last {hb_hours} hours."
             
     return backups
 
