@@ -582,7 +582,28 @@ def get_raw_logs(source: str):
     elif source == "rsync":
         return {"content": get_rsync_recent_logs()}
     else:
-        raise HTTPException(status_code=400, detail="Invalid log source.")
+        # Try to find specific log file for this backup source ID
+        possible_paths = [
+            os.path.join(LOG_DIR_RSYNC, f"{source}.log"),
+            os.path.join(LOG_DIR_RSYNC, f"rsync_{source}.log"),
+            os.path.join(LOG_DIR_RSYNC, f"{source.replace('rsync_', '')}.log")
+        ]
+        for path in possible_paths:
+            if os.path.exists(path) and os.path.isfile(path):
+                try:
+                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                        lines = f.readlines()
+                        # Return last 1000 lines
+                        recent = "".join(lines[-1000:])
+                        return {"content": f"--- Log file: {os.path.basename(path)} ---\n{recent}"}
+                except Exception as e:
+                    return {"content": f"Error reading log file for {source}: {str(e)}"}
+                    
+        # Fallback to general duplicacy log parsing if it starts with duplicacy_
+        if source.startswith("duplicacy_"):
+            return {"content": get_duplicacy_recent_logs()}
+            
+        raise HTTPException(status_code=400, detail=f"Invalid log source or no log file found for '{source}'.")
 
 @app.get("/api/usage")
 def get_usage():

@@ -74,9 +74,39 @@
 
             <!-- Dashboard Tab -->
             <section class="tab-pane active" id="tab-dashboard">
-                <!-- Backup Circles Summary Grid -->
-                <div class="backups-grid" id="backups-container">
-                    <p class="meta-text" style="grid-column: 1 / -1; text-align: center; padding: 2rem;">Loading backup status cards...</p>
+                <!-- Local Rsync Group -->
+                <div class="backup-group" id="group-rsync-wrapper" style="margin-bottom: 2.5rem; display: none;">
+                    <h3 class="group-title" style="margin-bottom: 1.25rem; font-family: var(--font-heading); font-size: 1.2rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem; border-bottom: 1px solid var(--border-card); padding-bottom: 0.5rem;">
+                        <i class="fa-solid fa-server" style="color: var(--color-success);"></i> Local Rsync Backups
+                    </h3>
+                    <div class="backups-grid" id="rsync-backups-container">
+                        <!-- Cards injected here -->
+                    </div>
+                </div>
+
+                <!-- Offsite Duplicacy Group -->
+                <div class="backup-group" id="group-duplicacy-wrapper" style="margin-bottom: 2.5rem; display: none;">
+                    <h3 class="group-title" style="margin-bottom: 1.25rem; font-family: var(--font-heading); font-size: 1.2rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem; border-bottom: 1px solid var(--border-card); padding-bottom: 0.5rem;">
+                        <i class="fa-solid fa-cloud-arrow-up" style="color: hsl(262, 85%, 65%);"></i> Offsite Duplicacy Backups
+                    </h3>
+                    <div class="backups-grid" id="duplicacy-backups-container">
+                        <!-- Cards injected here -->
+                    </div>
+                </div>
+                
+                <!-- Other/Generic Group (Fallback) -->
+                <div class="backup-group" id="group-other-wrapper" style="margin-bottom: 2.5rem; display: none;">
+                    <h3 class="group-title" style="margin-bottom: 1.25rem; font-family: var(--font-heading); font-size: 1.2rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem; border-bottom: 1px solid var(--border-card); padding-bottom: 0.5rem;">
+                        <i class="fa-solid fa-box-archive" style="color: var(--text-secondary);"></i> Other Backups
+                    </h3>
+                    <div class="backups-grid" id="other-backups-container">
+                        <!-- Cards injected here -->
+                    </div>
+                </div>
+
+                <!-- Empty State / Loading State -->
+                <div id="dashboard-empty-state" style="text-align: center; padding: 4rem 2rem;">
+                    <p class="meta-text">Loading backup status cards...</p>
                 </div>
             </section>
 

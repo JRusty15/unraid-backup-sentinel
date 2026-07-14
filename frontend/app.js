@@ -82,15 +82,60 @@ async function loadBackupStatuses() {
         if (!res.ok) throw new Error('Failed to fetch backup statuses');
         const data = await res.json();
         
-        const container = document.getElementById('backups-container');
-        container.innerHTML = '';
+        // Populate log selector dropdown dynamically
+        const logSelector = document.getElementById('log-selector');
+        if (logSelector) {
+            const currentVal = logSelector.value;
+            logSelector.innerHTML = `
+                <option value="syslog">Unraid Syslog (24h)</option>
+                <option value="duplicacy">Duplicacy (All Backup Jobs)</option>
+            `;
+            data.forEach(backup => {
+                const option = document.createElement('option');
+                option.value = backup.id;
+                let prefix = '';
+                if (backup.id.toLowerCase().includes('rsync')) {
+                    prefix = 'Local Rsync: ';
+                } else if (backup.id.toLowerCase().includes('duplicacy')) {
+                    prefix = 'Offsite Duplicacy: ';
+                } else {
+                    prefix = 'Backup: ';
+                }
+                option.textContent = `${prefix}${formatBackupId(backup.id)}`;
+                logSelector.appendChild(option);
+            });
+            // Restore selection if it still exists
+            if ([...logSelector.options].some(o => o.value === currentVal)) {
+                logSelector.value = currentVal;
+            }
+        }
         
+        const rsyncContainer = document.getElementById('rsync-backups-container');
+        const duplicacyContainer = document.getElementById('duplicacy-backups-container');
+        const otherContainer = document.getElementById('other-backups-container');
+        
+        if (rsyncContainer) rsyncContainer.innerHTML = '';
+        if (duplicacyContainer) duplicacyContainer.innerHTML = '';
+        if (otherContainer) otherContainer.innerHTML = '';
+        
+        const emptyState = document.getElementById('dashboard-empty-state');
         if (data.length === 0) {
-            container.innerHTML = '<p class="meta-text" style="grid-column: 1 / -1; text-align: center; padding: 2rem;">No backups registered yet.</p>';
+            if (emptyState) {
+                emptyState.style.display = 'block';
+                emptyState.innerHTML = '<p class="meta-text">No backups registered yet.</p>';
+            }
+            document.getElementById('group-rsync-wrapper').style.display = 'none';
+            document.getElementById('group-duplicacy-wrapper').style.display = 'none';
+            document.getElementById('group-other-wrapper').style.display = 'none';
             return;
+        } else {
+            if (emptyState) emptyState.style.display = 'none';
         }
 
         let systemHealth = 'healthy';
+        let rsyncCount = 0;
+        let duplicacyCount = 0;
+        let otherCount = 0;
         
         data.forEach(backup => {
             const id = backup.id;
@@ -150,8 +195,22 @@ async function loadBackupStatuses() {
                     </div>
                 </div>
             `;
-            container.appendChild(card);
+            
+            if (id.toLowerCase().includes('rsync')) {
+                if (rsyncContainer) rsyncContainer.appendChild(card);
+                rsyncCount++;
+            } else if (id.toLowerCase().includes('duplicacy') || id.toLowerCase().includes('offsite')) {
+                if (duplicacyContainer) duplicacyContainer.appendChild(card);
+                duplicacyCount++;
+            } else {
+                if (otherContainer) otherContainer.appendChild(card);
+                otherCount++;
+            }
         });
+        
+        document.getElementById('group-rsync-wrapper').style.display = rsyncCount > 0 ? 'block' : 'none';
+        document.getElementById('group-duplicacy-wrapper').style.display = duplicacyCount > 0 ? 'block' : 'none';
+        document.getElementById('group-other-wrapper').style.display = otherCount > 0 ? 'block' : 'none';
         
         // Update overall system status indicator
         const sysLabel = document.getElementById('system-overall-health');
