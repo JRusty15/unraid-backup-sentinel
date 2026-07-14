@@ -532,9 +532,12 @@ async function loadDockerStatus() {
             card.innerHTML = `
                 <div class="docker-status-header">
                     <h3 style="margin: 0; font-size: 1.1rem;">${escapeHtml(name)}</h3>
-                    <div class="docker-badges">
+                    <div class="docker-badges" style="display: flex; align-items: center; gap: 0.5rem;">
                         <span class="docker-badge ${status}">${escapeHtml(status)}</span>
                         <span class="docker-badge ${apiHealth}">${escapeHtml(apiHealth)}</span>
+                        <button class="btn-remove-service" onclick="removeDockerService('${id}')" title="Stop monitoring this container">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
                     </div>
                 </div>
                 
@@ -621,6 +624,46 @@ async function triggerDockerProbe() {
         alert("Failed to run Docker prober: " + err.message);
         btn.disabled = false;
         btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Check Health Now';
+    }
+}
+
+// Trigger Docker container auto-discovery
+async function discoverDockerContainers() {
+    const btn = document.getElementById('btn-discover-docker');
+    if (!btn) return;
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Discovering...';
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/docker/discover`, { method: 'POST' });
+        if (!res.ok) throw new Error('API discovery call failed');
+        const data = await res.json();
+        
+        alert(data.message);
+        await loadDockerStatus();
+        
+    } catch (err) {
+        alert("Failed to discover containers: " + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Discover Containers';
+    }
+}
+
+// Remove a Docker service from monitoring
+async function removeDockerService(serviceId) {
+    const check = confirm(`Are you sure you want to stop monitoring this container? This will remove it from the Sentinel database.`);
+    if (!check) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/docker/service/${serviceId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('API delete call failed');
+        const data = await res.json();
+        
+        await loadDockerStatus();
+    } catch (err) {
+        alert("Failed to remove service: " + err.message);
     }
 }
 

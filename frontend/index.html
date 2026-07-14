@@ -148,11 +148,16 @@
 
             <!-- Docker Services Health Tab -->
             <section class="tab-pane" id="tab-docker">
-                <div class="docker-dashboard-header" style="margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center;">
+                <div class="docker-dashboard-header" style="margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
                     <p class="meta-text" id="docker-last-probed">Last checked: -</p>
-                    <button class="btn btn-secondary" id="btn-probe-docker" onclick="triggerDockerProbe()" style="padding: 0.5rem 1rem; font-size: 0.85rem;">
-                        <i class="fa-solid fa-arrows-rotate"></i> Check Health Now
-                    </button>
+                    <div style="display: flex; gap: 0.75rem;">
+                        <button class="btn btn-secondary" id="btn-discover-docker" onclick="discoverDockerContainers()" style="padding: 0.5rem 1rem; font-size: 0.85rem; background-color: hsla(262, 85%, 65%, 0.12); border-color: hsl(262, 85%, 65%); color: hsl(262, 85%, 65%);">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Discover Containers
+                        </button>
+                        <button class="btn btn-secondary" id="btn-probe-docker" onclick="triggerDockerProbe()" style="padding: 0.5rem 1rem; font-size: 0.85rem;">
+                            <i class="fa-solid fa-arrows-rotate"></i> Check Health Now
+                        </button>
+                    </div>
                 </div>
                 <div class="backups-grid" id="docker-services-container">
                     <p class="meta-text" style="grid-column: 1 / -1; text-align: center; padding: 2rem;">Loading Docker service health statuses...</p>
@@ -272,6 +277,6 @@
     </div>
 
     <!-- JavaScript File -->
-    <script src="app.js?v=2.0.2"></script>
+    <script src="app.js?v=2.0.4"></script>
 </body>
 </html>

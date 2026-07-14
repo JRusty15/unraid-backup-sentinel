@@ -960,3 +960,22 @@ body {
     line-height: 1.4;
     text-align: left;
 }
+
+.btn-remove-service {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 0.95rem;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+}
+
+.btn-remove-service:hover {
+    color: var(--color-failed);
+    background-color: hsla(355, 85%, 55%, 0.1);
+}

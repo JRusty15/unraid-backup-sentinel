@@ -987,6 +987,98 @@ async def trigger_docker_verify(background_tasks: BackgroundTasks):
     background_tasks.add_task(probe_docker_services)
     return {"message": "Docker services probe triggered in background."}
 
+@app.post("/api/docker/discover")
+def discover_docker_services():
+    try:
+        containers = query_docker_socket("/containers/json?all=true")
+    except Exception as e:
+        logger.error("Failed to read Docker socket for discovery: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to reach Docker socket: {str(e)}")
+        
+    discovered = []
+    host_ip = "10.0.0.54"
+    with get_db() as conn:
+        cursor = conn.execute("SELECT host_ip FROM docker_services LIMIT 1")
+        row = cursor.fetchone()
+        if row:
+            host_ip = row["host_ip"]
+            
+    with get_db() as conn:
+        for c in containers:
+            c_names = c.get("Names", [])
+            if not c_names:
+                continue
+            c_name = c_names[0].lstrip('/')
+            
+            # Skip ourselves
+            if "sentinel" in c_name.lower():
+                continue
+                
+            # Clean ID (e.g. "binhex-sonarr" -> "sonarr")
+            service_id = c_name.replace("binhex-", "").replace("vpn-", "")
+            
+            # Check if already exists
+            cursor = conn.execute("SELECT 1 FROM docker_services WHERE id = ?", (service_id,))
+            if cursor.fetchone():
+                continue
+                
+            # Find public port
+            port = None
+            ports_list = c.get("Ports", [])
+            for p in ports_list:
+                if p.get("Type") == "tcp" and p.get("PublicPort"):
+                    port = p["PublicPort"]
+                    break
+            if not port:
+                for p in ports_list:
+                    if p.get("Type") == "tcp" and p.get("PrivatePort"):
+                        port = p["PrivatePort"]
+                        break
+            if not port:
+                if "sonarr" in service_id:
+                    port = 8989
+                elif "radarr" in service_id:
+                    port = 7878
+                elif "sabnzbd" in service_id:
+                    port = 8080
+                else:
+                    port = 80
+                    
+            display_name = service_id.replace("-", " ").replace("_", " ").title()
+            
+            conn.execute(
+                """
+                INSERT INTO docker_services (id, name, container_name, port, host_ip, status, api_health, last_run, message, log_snippet)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (service_id, display_name, c_name, port, host_ip, "unknown", "unknown", datetime.datetime.now(datetime.timezone.utc).isoformat(), "Discovered and awaiting check...", "")
+            )
+            discovered.append({"id": service_id, "name": display_name, "container_name": c_name, "port": port})
+            
+        conn.commit()
+        
+    if discovered:
+        # Trigger immediate check in background
+        import asyncio
+        asyncio.create_task(probe_docker_services())
+        
+    return {"message": f"Successfully discovered and added {len(discovered)} services.", "discovered": discovered}
+
+@app.delete("/api/docker/service/{service_id}")
+def delete_docker_service(service_id: str):
+    try:
+        with get_db() as conn:
+            cursor = conn.execute("SELECT 1 FROM docker_services WHERE id = ?", (service_id,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="Service not found.")
+            conn.execute("DELETE FROM docker_services WHERE id = ?", (service_id,))
+            conn.commit()
+        logger.info("Deleted Docker service '%s' from db.", service_id)
+        return {"message": f"Successfully removed service '{service_id}'."}
+    except Exception as e:
+        logger.error("Failed to delete Docker service: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Start the background task scheduler upon startup
 @app.on_event("startup")
 async def on_startup():
