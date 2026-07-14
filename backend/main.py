@@ -716,25 +716,48 @@ async def probe_docker_services():
                     api_health = "unresponsive"
                     message = f"Port check failed: {str(e)}"
                     
-        # 2.5 Scan logs for critical errors if container is running
+        # 2.5 Scan logs for critical errors if container is running (Chronological recovery checks)
         if container_status == "running" and log_snippet:
             error_keywords = ["error", "critical", "fatal", "malformed", "corruption", "failed", "panic"]
-            error_lines = []
-            for line in log_snippet.splitlines():
-                lower_line = line.lower()
-                if any(kw in lower_line for kw in error_keywords):
-                    if any(noise in lower_line for noise in ["0 errors", "no error", "0 failed", "no failed", "error: null", "errorcode: 0", "errors=ignore"]):
-                        continue
-                    error_lines.append(line.strip())
+            recovery_keywords = ["success", "successful", "recovered", "connected", "ready", "listening", "online", "established", "present"]
             
-            if error_lines:
-                if api_health == "healthy":
-                    api_health = "warning"
-                    most_recent_err = error_lines[-1]
-                    if len(most_recent_err) > 80:
-                        most_recent_err = most_recent_err[:77] + "..."
-                    message = f"Log Alert: {most_recent_err}"
+            last_error_idx = -1
+            last_recovery_idx = -1
+            error_lines = []
+            
+            lines = log_snippet.splitlines()
+            for idx, line in enumerate(lines):
+                lower_line = line.lower()
+                
+                # Check for errors
+                has_error = any(kw in lower_line for kw in error_keywords)
+                if has_error:
+                    if any(noise in lower_line for noise in ["0 errors", "no error", "0 failed", "no failed", "error: null", "errorcode: 0", "errors=ignore"]):
+                        has_error = False
+                
+                if has_error:
+                    last_error_idx = idx
+                    error_lines.append(line.strip())
                     
+                # Check for recovery
+                if any(kw in lower_line for kw in recovery_keywords):
+                    last_recovery_idx = idx
+            
+            # If errors found, check if a recovery message appeared later in the logs
+            if error_lines:
+                if last_recovery_idx > last_error_idx:
+                    # It recovered!
+                    if api_health == "healthy":
+                        message = f"Resolved: container recovered from log errors."
+                else:
+                    # Active error!
+                    if api_health == "healthy":
+                        api_health = "warning"
+                        most_recent_err = error_lines[-1]
+                        if len(most_recent_err) > 80:
+                            most_recent_err = most_recent_err[:77] + "..."
+                        message = f"Log Alert: {most_recent_err}"
+                        
         # 3. Update Database & Check State Transitions for Discord Alerts
         prev_status = "unknown"
         prev_api_health = "unknown"
