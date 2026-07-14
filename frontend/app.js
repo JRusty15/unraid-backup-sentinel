@@ -520,7 +520,7 @@ async function loadDockerStatus() {
                 statusClass = 'failed';
                 iconClass = 'fa-solid fa-triangle-exclamation';
                 iconColor = 'var(--color-failed)';
-            } else if (apiHealth === 'unresponsive' || status === 'error') {
+            } else if (apiHealth === 'unresponsive' || status === 'error' || apiHealth === 'warning') {
                 statusClass = 'warning';
                 iconClass = 'fa-solid fa-circle-exclamation';
                 iconColor = 'var(--color-warning)';

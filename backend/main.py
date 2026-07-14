@@ -715,7 +715,35 @@ async def probe_docker_services():
                     api_health = "unresponsive"
                     message = f"Port check failed: {str(e)}"
                     
-        # 3. Update Database
+        # 2.5 Scan logs for critical errors if container is running
+        if container_status == "running" and log_snippet:
+            error_keywords = ["error", "critical", "fatal", "malformed", "corruption", "failed", "panic"]
+            error_lines = []
+            for line in log_snippet.splitlines():
+                lower_line = line.lower()
+                if any(kw in lower_line for kw in error_keywords):
+                    if any(noise in lower_line for noise in ["0 errors", "no error", "0 failed", "no failed", "error: null", "errorcode: 0", "errors=ignore"]):
+                        continue
+                    error_lines.append(line.strip())
+            
+            if error_lines:
+                if api_health == "healthy":
+                    api_health = "warning"
+                    most_recent_err = error_lines[-1]
+                    if len(most_recent_err) > 80:
+                        most_recent_err = most_recent_err[:77] + "..."
+                    message = f"Log Alert: {most_recent_err}"
+                    
+        # 3. Update Database & Check State Transitions for Discord Alerts
+        prev_status = "unknown"
+        prev_api_health = "unknown"
+        with get_db() as conn:
+            cursor = conn.execute("SELECT status, api_health FROM docker_services WHERE id = ?", (service_id,))
+            row = cursor.fetchone()
+            if row:
+                prev_status = row["status"]
+                prev_api_health = row["api_health"]
+                
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
         with get_db() as conn:
             conn.execute(
@@ -728,6 +756,24 @@ async def probe_docker_services():
             )
             conn.commit()
             
+        # Send Discord notification on state transition (prevents repeating spam)
+        prev_level = "healthy"
+        if prev_status != "running" and prev_status != "unknown":
+            prev_level = "critical"
+        elif prev_api_health in ["unresponsive", "warning", "unhealthy"]:
+            prev_level = "warning"
+            
+        curr_level = "healthy"
+        if container_status != "running":
+            curr_level = "critical"
+        elif api_health in ["unresponsive", "warning", "unhealthy"]:
+            curr_level = "warning"
+            
+        if prev_level != curr_level and prev_status != "unknown":
+            emoji = "🟢" if curr_level == "healthy" else ("⚠️" if curr_level == "warning" else "🚨")
+            summary_msg = f"{emoji} **{name}** health changed from **{prev_level}** to **{curr_level}**.\n\n*   **Container Status:** `{container_status}`\n*   **API Health:** `{api_health}`\n*   **Details:** {message}"
+            send_discord_notification(curr_level, summary_msg)
+            
     logger.info("Docker services probe completed.")
 
 async def start_docker_prober_loop():
@@ -738,7 +784,7 @@ async def start_docker_prober_loop():
             await probe_docker_services()
         except Exception as e:
             logger.error("Error in Docker prober loop: %s", e)
-        await asyncio.sleep(120)
+        await asyncio.sleep(900)
 
 # Hourly background checker
 async def start_background_loop():
