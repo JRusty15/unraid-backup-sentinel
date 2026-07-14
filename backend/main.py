@@ -127,7 +127,13 @@ def init_db():
                 INSERT INTO docker_services (id, name, container_name, port, host_ip, status, api_health, last_run, message, log_snippet)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("plex", "Plex Media Server", "plex", 32400, "10.0.0.54", "unknown", "unknown", datetime.datetime.now(datetime.timezone.utc).isoformat(), "Waiting for first probe...", "")
+                ("plex", "Plex Media Server", "binhex-plex", 32400, "10.0.0.54", "unknown", "unknown", datetime.datetime.now(datetime.timezone.utc).isoformat(), "Waiting for first probe...", "")
+            )
+        else:
+            # Migration: Update existing setup container name if it is still the default 'plex'
+            conn.execute(
+                "UPDATE docker_services SET container_name = ? WHERE id = ? AND container_name = ?",
+                ("binhex-plex", "plex", "plex")
             )
             
         conn.commit()
