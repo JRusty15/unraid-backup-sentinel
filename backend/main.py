@@ -137,7 +137,10 @@ def init_db():
 def check_stale_status(last_run_str: str, max_hours: int) -> bool:
     try:
         last_run = datetime.datetime.fromisoformat(last_run_str)
-        delta = datetime.datetime.now() - last_run
+        # Ensure comparison is timezone-aware
+        if last_run.tzinfo is None:
+            last_run = last_run.replace(tzinfo=datetime.timezone.utc)
+        delta = datetime.datetime.now(datetime.timezone.utc) - last_run
         return delta > datetime.timedelta(hours=max_hours)
     except Exception:
         return False
@@ -737,7 +740,7 @@ async def start_background_loop():
     await asyncio.sleep(5) # Let DB initialize
     while True:
         try:
-            now = datetime.datetime.now()
+            now = datetime.datetime.now(datetime.timezone.utc)
             # 1. Look up last analysis run
             with get_db() as conn:
                 cursor = conn.execute("SELECT timestamp FROM analysis_history ORDER BY id DESC LIMIT 1")
@@ -748,6 +751,8 @@ async def start_background_loop():
                 run_needed = True
             else:
                 last_run = datetime.datetime.fromisoformat(row["timestamp"])
+                if last_run.tzinfo is None:
+                    last_run = last_run.replace(tzinfo=datetime.timezone.utc)
                 # Run if last run is older than 24 hours
                 if now - last_run >= datetime.timedelta(hours=24):
                     run_needed = True
