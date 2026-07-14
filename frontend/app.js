@@ -149,7 +149,11 @@ async function loadBackupStatuses() {
             
             if (id.toLowerCase().includes('rsync')) {
                 iconClass = 'fa-solid fa-server';
-            } else if (id.toLowerCase().includes('duplicacy') || id.toLowerCase().includes('offsite')) {
+            } else if (id.toLowerCase().includes('duplicacy') || 
+                       id.toLowerCase().includes('offsite') || 
+                       id.toLowerCase().includes('samba') || 
+                       id.toLowerCase().includes('music') || 
+                       id.toLowerCase().includes('tvshow')) {
                 iconClass = 'fa-solid fa-cloud-arrow-up';
             } else {
                 iconClass = 'fa-solid fa-box-archive';
@@ -199,7 +203,11 @@ async function loadBackupStatuses() {
             if (id.toLowerCase().includes('rsync')) {
                 if (rsyncContainer) rsyncContainer.appendChild(card);
                 rsyncCount++;
-            } else if (id.toLowerCase().includes('duplicacy') || id.toLowerCase().includes('offsite')) {
+            } else if (id.toLowerCase().includes('duplicacy') || 
+                       id.toLowerCase().includes('offsite') || 
+                       id.toLowerCase().includes('samba') || 
+                       id.toLowerCase().includes('music') || 
+                       id.toLowerCase().includes('tvshow')) {
                 if (duplicacyContainer) duplicacyContainer.appendChild(card);
                 duplicacyCount++;
             } else {
