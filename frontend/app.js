@@ -355,8 +355,8 @@ function formatDate(isoStr) {
         const date = new Date(isoStr);
         const now = new Date();
         const diffMs = now - date;
-        const diffMin = Math.floor(diffMs / 60000);
-        const diffHrs = Math.floor(diffMin / 600);
+        const diffMin = Math.max(0, Math.floor(diffMs / 60000));
+        const diffHrs = Math.floor(diffMin / 60);
         
         if (diffMin < 1) return 'Just now';
         if (diffMin < 60) return `${diffMin}m ago`;

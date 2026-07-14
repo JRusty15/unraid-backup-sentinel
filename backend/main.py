@@ -110,7 +110,7 @@ def init_db():
             if not cursor.fetchone():
                 conn.execute(
                     "INSERT INTO backups (id, status, last_run, message, heartbeat_hours) VALUES (?, ?, ?, ?, ?)",
-                    (backup_id, "unknown", datetime.datetime.now().isoformat(), "No backup reports received yet.", None)
+                    (backup_id, "unknown", datetime.datetime.now(datetime.timezone.utc).isoformat(), "No backup reports received yet.", None)
                 )
         conn.commit()
     logger.info("Database initialized successfully.")
@@ -366,7 +366,7 @@ async def run_log_analysis():
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO analysis_history (timestamp, report, status, prompt_tokens, completion_tokens, cost) VALUES (?, ?, ?, ?, ?, ?)",
-                (datetime.datetime.now().isoformat(), mock_report, "warning", 0, 0, 0.0)
+                (datetime.datetime.now(datetime.timezone.utc).isoformat(), mock_report, "warning", 0, 0, 0.0)
             )
             conn.commit()
         return
@@ -447,7 +447,7 @@ async def run_log_analysis():
         elif "![WARNING]" in report_text or "warning" in report_text.lower():
             status = "warning"
             
-        timestamp = datetime.datetime.now().isoformat()
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
         
         # Log to Database
         with get_db() as conn:
@@ -512,7 +512,7 @@ def receive_report(report: BackupReport):
     if report.status not in ["success", "failed", "warning"]:
         raise HTTPException(status_code=400, detail="Invalid status. Use 'success', 'failed', or 'warning'.")
         
-    timestamp = datetime.datetime.now().isoformat()
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
     
     with get_db() as conn:
         # Fetch existing record to check heartbeat_hours
