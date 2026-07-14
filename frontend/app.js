@@ -45,6 +45,10 @@ function switchTab(tabId) {
         titleEl.textContent = 'Gemini Cost & Usage';
         subtitleEl.textContent = 'Financial auditing and token counts of AI engine operations.';
         loadCostUsageData();
+    } else if (tabId === 'docker') {
+        titleEl.textContent = 'Docker Services';
+        subtitleEl.textContent = 'Operational health, container states, and responsive checks.';
+        loadDockerStatus();
     } else if (tabId === 'settings') {
         titleEl.textContent = 'System Settings';
         subtitleEl.textContent = 'Integration aids and database maintenance controls.';
@@ -467,6 +471,156 @@ async function resetAppDatabase() {
         alert("Failed to reset database: " + err.message);
         btn.disabled = false;
         btn.innerHTML = '<i class="fa-solid fa-trash-can"></i> Clear Database';
+    }
+}
+
+// Load Docker Services status
+async function loadDockerStatus() {
+    const container = document.getElementById('docker-services-container');
+    if (!container) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/docker/status`);
+        if (!res.ok) throw new Error('Failed to fetch Docker status');
+        const data = await res.json();
+        
+        container.innerHTML = '';
+        if (data.length === 0) {
+            container.innerHTML = '<p class="meta-text" style="grid-column: 1 / -1; text-align: center; padding: 2rem;">No Docker services monitored yet.</p>';
+            return;
+        }
+        
+        let latestTime = null;
+        
+        data.forEach(service => {
+            const id = service.id;
+            const name = service.name;
+            const cName = service.container_name;
+            const port = service.port;
+            const hostIp = service.host_ip;
+            const status = service.status;          
+            const apiHealth = service.api_health;    
+            const lastRun = service.last_run;
+            const message = service.message || '';
+            const logs = service.log_snippet || 'No logs available.';
+            
+            if (lastRun) {
+                const checkTime = new Date(lastRun);
+                if (!latestTime || checkTime > latestTime) latestTime = checkTime;
+            }
+            
+            let statusClass = 'unknown';
+            let iconClass = 'fa-solid fa-cube';
+            let iconColor = 'var(--text-secondary)';
+            
+            if (status === 'running' && apiHealth === 'healthy') {
+                statusClass = 'success';
+                iconColor = 'var(--color-success)';
+            } else if (status === 'stopped' || apiHealth === 'unhealthy' || status === 'not_found') {
+                statusClass = 'failed';
+                iconClass = 'fa-solid fa-triangle-exclamation';
+                iconColor = 'var(--color-failed)';
+            } else if (apiHealth === 'unresponsive' || status === 'error') {
+                statusClass = 'warning';
+                iconClass = 'fa-solid fa-circle-exclamation';
+                iconColor = 'var(--color-warning)';
+            }
+            
+            const offset = (statusClass === 'unknown') ? '314' : '0';
+            const card = document.createElement('div');
+            card.className = 'card status-card docker-card';
+            card.innerHTML = `
+                <div class="docker-status-header">
+                    <h3 style="margin: 0; font-size: 1.1rem;">${escapeHtml(name)}</h3>
+                    <div class="docker-badges">
+                        <span class="docker-badge ${status}">${escapeHtml(status)}</span>
+                        <span class="docker-badge ${apiHealth}">${escapeHtml(apiHealth)}</span>
+                    </div>
+                </div>
+                
+                <div class="card-body status-body" style="padding: 0; flex-grow: 0;">
+                    <div class="ring-container">
+                        <svg class="status-ring" viewBox="0 0 120 120">
+                            <circle class="ring-bg" cx="60" cy="60" r="50" />
+                            <circle class="ring-fg ${statusClass}" cx="60" cy="60" r="50" style="stroke-dashoffset: ${offset};" />
+                        </svg>
+                        <div class="ring-inner">
+                            <i class="${iconClass} status-icon" style="color: ${iconColor};"></i>
+                        </div>
+                    </div>
+                    <div class="status-details">
+                        <p class="timestamp-label" style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">${escapeHtml(message)}</p>
+                        <div class="docker-meta">
+                            <span><i class="fa-solid fa-link" style="width: 14px; font-size: 0.75rem;"></i> Connection: ${escapeHtml(hostIp)}:${port}</span>
+                            <span><i class="fa-solid fa-box" style="width: 14px; font-size: 0.75rem;"></i> Container: ${escapeHtml(cName)}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="display: flex; flex-direction: column; gap: 0.75rem; width: 100%;">
+                    <button class="docker-log-toggle" id="btn-toggle-${id}" onclick="toggleDockerLogs('${id}')">
+                        <i class="fa-solid fa-terminal"></i> Show Container Logs
+                    </button>
+                    <div class="docker-log-panel" id="log-panel-${id}">${escapeHtml(logs)}</div>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+        
+        const timeLabel = document.getElementById('docker-last-probed');
+        if (timeLabel) {
+            if (latestTime) {
+                timeLabel.textContent = `Last checked: ${formatDate(latestTime.toISOString())}`;
+            } else {
+                timeLabel.textContent = 'Last checked: Never';
+            }
+        }
+        
+    } catch (err) {
+        container.innerHTML = `<p class="meta-text" style="grid-column: 1 / -1; text-align: center; color: var(--color-failed); padding: 2rem;">Error loading Docker statuses: ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+// Toggle raw container logs display in cards
+function toggleDockerLogs(serviceId) {
+    const panel = document.getElementById(`log-panel-${serviceId}`);
+    const btn = document.getElementById(`btn-toggle-${serviceId}`);
+    if (!panel || !btn) return;
+    
+    if (panel.style.display === 'block') {
+        panel.style.display = 'none';
+        btn.innerHTML = '<i class="fa-solid fa-terminal"></i> Show Container Logs';
+        btn.classList.remove('active');
+    } else {
+        panel.style.display = 'block';
+        btn.innerHTML = '<i class="fa-solid fa-terminal"></i> Hide Container Logs';
+        btn.classList.add('active');
+        panel.scrollTop = panel.scrollHeight; 
+    }
+}
+
+// Trigger manual Docker verify check
+async function triggerDockerProbe() {
+    const btn = document.getElementById('btn-probe-docker');
+    if (!btn) return;
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking Health...';
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/docker/verify`, { method: 'POST' });
+        if (!res.ok) throw new Error('API probe call failed');
+        
+        setTimeout(async () => {
+            await loadDockerStatus();
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Check Health Now';
+        }, 3000);
+        
+    } catch (err) {
+        alert("Failed to run Docker prober: " + err.message);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Check Health Now';
     }
 }
 

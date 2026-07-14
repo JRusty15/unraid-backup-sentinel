@@ -104,6 +104,32 @@ def init_db():
             )
         """)
         
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS docker_services (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                container_name TEXT NOT NULL,
+                port INTEGER NOT NULL,
+                host_ip TEXT NOT NULL,
+                status TEXT NOT NULL,
+                api_health TEXT NOT NULL,
+                last_run TEXT,
+                message TEXT,
+                log_snippet TEXT
+            )
+        """)
+        
+        # Populate initial Plex docker service if it doesn't exist
+        cursor = conn.execute("SELECT 1 FROM docker_services WHERE id = ?", ("plex",))
+        if not cursor.fetchone():
+            conn.execute(
+                """
+                INSERT INTO docker_services (id, name, container_name, port, host_ip, status, api_health, last_run, message, log_snippet)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("plex", "Plex Media Server", "plex", 32400, "10.0.0.54", "unknown", "unknown", datetime.datetime.now(datetime.timezone.utc).isoformat(), "Waiting for first probe...", "")
+            )
+            
         conn.commit()
     logger.info("Database initialized successfully.")
 
@@ -133,6 +159,135 @@ def parse_syslog_line_date(line: str, current_year: int) -> Optional[datetime.da
         return dt
     except Exception:
         return None
+
+def query_docker_socket(path: str) -> dict:
+    """Queries the local Docker socket for a specific REST resource."""
+    socket_path = "/var/run/docker.sock"
+    if not os.path.exists(socket_path):
+        raise FileNotFoundError(f"Docker socket not found at {socket_path}")
+        
+    import socket
+    import json
+    
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.settimeout(2.0)
+        s.connect(socket_path)
+        
+        request = f"GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+        s.sendall(request.encode("utf-8"))
+        
+        response = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+            
+        parts = response.split(b"\r\n\r\n", 1)
+        if len(parts) < 2:
+            raise ValueError("Invalid HTTP response from Docker socket.")
+            
+        header, body = parts[0], parts[1]
+        header_lines = header.decode("utf-8").split("\r\n")
+        status_line = header_lines[0]
+        if "200 OK" not in status_line:
+            raise ValueError(f"Docker API error: {status_line}")
+            
+        is_chunked = any("Transfer-Encoding: chunked" in h for h in header_lines)
+        if is_chunked:
+            parsed_body = b""
+            pos = 0
+            while pos < len(body):
+                nl_idx = body.find(b"\r\n", pos)
+                if nl_idx == -1:
+                    break
+                chunk_size_str = body[pos:nl_idx].strip()
+                if not chunk_size_str:
+                    break
+                chunk_size = int(chunk_size_str, 16)
+                if chunk_size == 0:
+                    break
+                pos = nl_idx + 2
+                parsed_body += body[pos:pos+chunk_size]
+                pos += chunk_size + 2
+            body = parsed_body
+
+        return json.loads(body.decode("utf-8"))
+    finally:
+        s.close()
+
+def query_docker_logs(container_name: str, tail: int = 30) -> str:
+    """Fetches the last N lines of logs from a container and demultiplexes standard streams."""
+    socket_path = "/var/run/docker.sock"
+    if not os.path.exists(socket_path):
+        return "Docker socket not mounted."
+        
+    import socket
+    
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.settimeout(3.0)
+        s.connect(socket_path)
+        
+        path = f"/containers/{container_name}/logs?stdout=true&stderr=true&tail={tail}"
+        request = f"GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+        s.sendall(request.encode("utf-8"))
+        
+        response = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+            
+        parts = response.split(b"\r\n\r\n", 1)
+        if len(parts) < 2:
+            return "Invalid log response."
+            
+        header, body = parts[0], parts[1]
+        header_lines = header.decode("utf-8").split("\r\n")
+        if "200 OK" not in header_lines[0]:
+            return f"Container logs query failed: {header_lines[0]}"
+            
+        is_chunked = any("Transfer-Encoding: chunked" in h for h in header_lines)
+        if is_chunked:
+            parsed_body = b""
+            pos = 0
+            while pos < len(body):
+                nl_idx = body.find(b"\r\n", pos)
+                if nl_idx == -1:
+                    break
+                chunk_size_str = body[pos:nl_idx].strip()
+                if not chunk_size_str:
+                    break
+                chunk_size = int(chunk_size_str, 16)
+                if chunk_size == 0:
+                    break
+                pos = nl_idx + 2
+                parsed_body += body[pos:pos+chunk_size]
+                pos += chunk_size + 2
+            body = parsed_body
+
+        log_text = []
+        pos = 0
+        while pos + 8 <= len(body):
+            stream_type = body[pos]
+            size = int.from_bytes(body[pos+4:pos+8], byteorder="big")
+            pos += 8
+            if pos + size <= len(body):
+                chunk_payload = body[pos:pos+size]
+                log_text.append(chunk_payload.decode("utf-8", errors="ignore"))
+            pos += size
+            
+        if not log_text and body:
+            return body.decode("utf-8", errors="ignore")
+            
+        return "".join(log_text)
+    except Exception as e:
+        return f"Failed to retrieve logs: {str(e)}"
+    finally:
+        s.close()
 
 def get_syslog_last_24h() -> str:
     # Try looking for syslog files in LOG_DIR_SYSLOG
@@ -468,6 +623,114 @@ async def run_log_analysis():
             )
             conn.commit()
 
+async def probe_docker_services():
+    logger.info("Running Docker services probe...")
+    with get_db() as conn:
+        cursor = conn.execute("SELECT * FROM docker_services")
+        services = [dict(row) for row in cursor.fetchall()]
+        
+    for s in services:
+        service_id = s["id"]
+        c_name = s["container_name"]
+        host_ip = s["host_ip"]
+        port = s["port"]
+        
+        container_status = "unknown"
+        api_health = "unknown"
+        message = ""
+        log_snippet = ""
+        
+        # 1. Check Container Status via docker.sock
+        try:
+            c_info = query_docker_socket(f"/containers/{c_name}/json")
+            state = c_info.get("State", {})
+            running = state.get("Running", False)
+            
+            if running:
+                container_status = "running"
+                health = state.get("Health", {})
+                docker_health_status = health.get("Status", "")
+                if docker_health_status == "unhealthy":
+                    api_health = "unhealthy"
+                    message = "Docker reported container health check failed."
+            else:
+                container_status = "stopped"
+                exit_code = state.get("ExitCode", 0)
+                message = f"Container is stopped (Exit Code: {exit_code})."
+                
+            log_snippet = query_docker_logs(c_name, tail=20)
+            
+        except FileNotFoundError:
+            container_status = "unknown"
+            message = "Docker socket (/var/run/docker.sock) not mounted."
+        except Exception as e:
+            err_msg = str(e)
+            if "404" in err_msg or "no such container" in err_msg.lower():
+                container_status = "not_found"
+                message = f"Container '{c_name}' not found on host."
+            else:
+                container_status = "error"
+                message = f"Failed to query Docker daemon: {err_msg}"
+                
+        # 2. Check Application Level API Health (only if container is running)
+        if container_status == "running":
+            if service_id == "plex":
+                url = f"http://{host_ip}:{port}/identity"
+                try:
+                    import urllib.request
+                    req = urllib.request.Request(url, method="GET")
+                    with urllib.request.urlopen(req, timeout=3.0) as response:
+                        if response.status == 200:
+                            api_health = "healthy"
+                            message = "Plex is running and fully responsive."
+                        else:
+                            api_health = "unresponsive"
+                            message = f"Plex returned non-200 response: {response.status}."
+                except Exception as e:
+                    api_health = "unresponsive"
+                    message = f"API probe failed: Connection refused or timed out."
+            else:
+                try:
+                    import socket
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(2.0)
+                    result = sock.connect_ex((host_ip, port))
+                    if result == 0:
+                        api_health = "healthy"
+                        message = "Port connection successful."
+                    else:
+                        api_health = "unresponsive"
+                        message = "Port check failed: connection refused."
+                    sock.close()
+                except Exception as e:
+                    api_health = "unresponsive"
+                    message = f"Port check failed: {str(e)}"
+                    
+        # 3. Update Database
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE docker_services
+                SET status = ?, api_health = ?, last_run = ?, message = ?, log_snippet = ?
+                WHERE id = ?
+                """,
+                (container_status, api_health, timestamp, message, log_snippet, service_id)
+            )
+            conn.commit()
+            
+    logger.info("Docker services probe completed.")
+
+async def start_docker_prober_loop():
+    logger.info("Starting Docker prober loop...")
+    await asyncio.sleep(10)
+    while True:
+        try:
+            await probe_docker_services()
+        except Exception as e:
+            logger.error("Error in Docker prober loop: %s", e)
+        await asyncio.sleep(120)
+
 # Hourly background checker
 async def start_background_loop():
     logger.info("Starting background scheduler loop...")
@@ -646,6 +909,7 @@ def reset_database():
             conn.execute("DELETE FROM backups")
             conn.execute("DELETE FROM analysis_history")
             conn.execute("DELETE FROM api_usage")
+            conn.execute("DELETE FROM docker_services")
             conn.commit()
         init_db()
         logger.info("Database reset triggered via API.")
@@ -654,11 +918,24 @@ def reset_database():
         logger.error("Failed to reset database: %s", e)
         raise HTTPException(status_code=500, detail=f"Database reset failed: {str(e)}")
 
+@app.get("/api/docker/status")
+def get_docker_status():
+    with get_db() as conn:
+        cursor = conn.execute("SELECT * FROM docker_services")
+        services = [dict(row) for row in cursor.fetchall()]
+    return services
+
+@app.post("/api/docker/verify")
+async def trigger_docker_verify(background_tasks: BackgroundTasks):
+    background_tasks.add_task(probe_docker_services)
+    return {"message": "Docker services probe triggered in background."}
+
 # Start the background task scheduler upon startup
 @app.on_event("startup")
 async def on_startup():
     init_db()
     asyncio.create_task(start_background_loop())
+    asyncio.create_task(start_docker_prober_loop())
 
 # Serve static files for frontend
 # Ensure frontend directory exists

@@ -38,6 +38,9 @@
                 <button class="nav-item" id="btn-nav-ai" onclick="switchTab('ai')">
                     <i class="fa-solid fa-brain"></i> AI Diagnostics
                 </button>
+                <button class="nav-item" id="btn-nav-docker" onclick="switchTab('docker')">
+                    <i class="fa-solid fa-cubes"></i> Docker Services
+                </button>
                 <button class="nav-item" id="btn-nav-syslog" onclick="switchTab('syslog')">
                     <i class="fa-solid fa-server"></i> Logs & Syslog
                 </button>
@@ -140,6 +143,19 @@
                             <p>Trigger an AI analysis or wait for the daily scheduled job to view system insights.</p>
                         </div>
                     </div>
+                </div>
+            </section>
+
+            <!-- Docker Services Health Tab -->
+            <section class="tab-pane" id="tab-docker">
+                <div class="docker-dashboard-header" style="margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center;">
+                    <p class="meta-text" id="docker-last-probed">Last checked: -</p>
+                    <button class="btn btn-secondary" id="btn-probe-docker" onclick="triggerDockerProbe()" style="padding: 0.5rem 1rem; font-size: 0.85rem;">
+                        <i class="fa-solid fa-arrows-rotate"></i> Check Health Now
+                    </button>
+                </div>
+                <div class="backups-grid" id="docker-services-container">
+                    <p class="meta-text" style="grid-column: 1 / -1; text-align: center; padding: 2rem;">Loading Docker service health statuses...</p>
                 </div>
             </section>
 
