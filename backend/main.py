@@ -55,6 +55,7 @@ class BackupReport(BaseModel):
     status: str  # 'success', 'failed', 'warning'
     message: Optional[str] = ""
     heartbeat_hours: Optional[int] = None
+    log_content: Optional[str] = None
 
 # Database helper functions
 def get_db():
@@ -449,6 +450,18 @@ def receive_report(report: BackupReport):
         )
         conn.commit()
         
+    # Write pushed log content to file
+    if report.log_content:
+        try:
+            os.makedirs(LOG_DIR_RSYNC, exist_ok=True)
+            log_filename = f"{report.id}.log" if report.id == "local_rsync" else f"rsync_{report.id}.log"
+            log_filepath = os.path.join(LOG_DIR_RSYNC, log_filename)
+            with open(log_filepath, "w", encoding="utf-8") as f:
+                f.write(report.log_content)
+            logger.info("Saved pushed log content for %s to %s", report.id, log_filepath)
+        except Exception as e:
+            logger.error("Failed to save pushed log content for %s: %s", report.id, e)
+            
     logger.info("Received backup report for %s: %s", report.id, report.status)
     return {"message": "Report received successfully", "id": report.id, "status": report.status, "timestamp": timestamp}
 
