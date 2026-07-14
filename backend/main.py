@@ -23,6 +23,7 @@ logger = logging.getLogger("sentinel")
 DB_PATH = os.getenv("DB_PATH", "sentinel.db")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 LOG_DIR_SYSLOG = os.getenv("LOG_DIR_SYSLOG", "/app/logs/syslog")
 LOG_DIR_DUPLICACY = os.getenv("LOG_DIR_DUPLICACY", "/app/logs/duplicacy")
 LOG_DIR_RSYNC = os.getenv("LOG_DIR_RSYNC", "/app/logs/rsync")
@@ -263,6 +264,65 @@ def get_rsync_recent_logs() -> str:
         logger.error("Error reading Rsync logs: %s", e)
         return f"Error reading Rsync logs: {str(e)}"
 
+def send_discord_notification(status: str, summary: str):
+    if not DISCORD_WEBHOOK_URL:
+        return
+        
+    # Only notify on warning or critical/failed
+    if status.lower() not in ["warning", "critical", "failed"]:
+        return
+        
+    # Map status to color and emoji
+    if status.lower() in ["critical", "failed"]:
+        color = 15158332 # Red (#E74C3C)
+        emoji = "🔴"
+        title = "CRITICAL: Unraid Sentinel Alert"
+    else:
+        color = 15105570 # Orange (#E67E22)
+        emoji = "🟡"
+        title = "WARNING: Unraid Sentinel Alert"
+        
+    payload = {
+        "embeds": [
+            {
+                "title": f"{emoji} {title}",
+                "description": summary or "System diagnostics warning or error detected.",
+                "color": color,
+                "fields": [
+                    {
+                        "name": "Status",
+                        "value": status.upper(),
+                        "inline": True
+                    },
+                    {
+                        "name": "Timestamp",
+                        "value": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "inline": True
+                    }
+                ],
+                "footer": {
+                    "text": "Sent by Unraid Backup & Log Sentinel Node"
+                }
+            }
+        ]
+    }
+    
+    try:
+        import urllib.request
+        import json
+        req = urllib.request.Request(
+            DISCORD_WEBHOOK_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "unraid-sentinel"
+            }
+        )
+        urllib.request.urlopen(req)
+        logger.info("Sent Discord webhook notification successfully.")
+    except Exception as e:
+        logger.error("Failed to send Discord webhook: %s", e)
+
 # Core AI Analysis Runner
 async def run_log_analysis():
     logger.info("Starting log analysis job...")
@@ -346,6 +406,12 @@ async def run_log_analysis():
         
         ## Recommendations
         Bullet points of exact fixes if any warnings or errors are found. Keep it action-oriented.
+        
+        --- DISCORD NOTIFICATION SUMMARY ---
+        At the very end of your response, add a short summary enclosed in <discord_summary>...</discord_summary> tags.
+        This summary must be a single, short sentence describing the most critical finding (warnings or errors) if they exist. E.g. "Storage backup failed with exit code 1" or "Drive 2 reporting DMA write timeout errors in Syslog".
+        If the system is completely healthy, output: "All backups completed successfully and no issues detected."
+        Keep it under 150 characters.
         """
         
         # Call Gemini model
@@ -355,6 +421,15 @@ async def run_log_analysis():
         )
         
         report_text = response.text or "Error: Gemini returned empty content."
+        
+        # Extract Discord summary if present
+        discord_summary = ""
+        import re
+        match = re.search(r"<discord_summary>(.*?)</discord_summary>", report_text, re.DOTALL)
+        if match:
+            discord_summary = match.group(1).strip()
+            # Remove the tag from the report shown in the UI
+            report_text = re.sub(r"<discord_summary>.*?</discord_summary>", "", report_text, flags=re.DOTALL).strip()
         
         # Token usage and cost tracking
         prompt_tokens = 0
@@ -386,6 +461,9 @@ async def run_log_analysis():
             )
             conn.commit()
             
+        # Trigger Discord webhook notification if there are issues
+        send_discord_notification(status, discord_summary)
+        
         logger.info("Log analysis completed successfully. Tokens: In=%d, Out=%d. Cost: $%f", prompt_tokens, completion_tokens, cost)
         
     except Exception as e:

@@ -35,6 +35,9 @@
                 <button class="nav-item active" id="btn-nav-dashboard" onclick="switchTab('dashboard')">
                     <i class="fa-solid fa-chart-pie"></i> Dashboard
                 </button>
+                <button class="nav-item" id="btn-nav-ai" onclick="switchTab('ai')">
+                    <i class="fa-solid fa-brain"></i> AI Diagnostics
+                </button>
                 <button class="nav-item" id="btn-nav-syslog" onclick="switchTab('syslog')">
                     <i class="fa-solid fa-server"></i> Logs & Syslog
                 </button>
@@ -66,9 +69,6 @@
                     <button class="btn btn-secondary" id="btn-refresh" onclick="refreshData()">
                         <i class="fa-solid fa-rotate"></i> Sync Data
                     </button>
-                    <button class="btn btn-primary" id="btn-analyze" onclick="triggerAIAnalysis()">
-                        <i class="fa-solid fa-wand-magic-sparkles"></i> AI Analysis
-                    </button>
                 </div>
             </header>
 
@@ -78,7 +78,10 @@
                 <div class="backups-grid" id="backups-container">
                     <p class="meta-text" style="grid-column: 1 / -1; text-align: center; padding: 2rem;">Loading backup status cards...</p>
                 </div>
+            </section>
 
+            <!-- AI Diagnostics Tab -->
+            <section class="tab-pane" id="tab-ai">
                 <!-- AI Sentinel Insights Area -->
                 <div class="card ai-card">
                     <div class="card-header ai-header">
@@ -89,7 +92,12 @@
                                 <p class="meta-text" id="ai-last-run">Last updated: -</p>
                             </div>
                         </div>
-                        <span class="ai-badge" id="ai-health-status">Unknown</span>
+                        <div class="ai-header-actions" style="display: flex; gap: 0.75rem; align-items: center;">
+                            <span class="ai-badge" id="ai-health-status">Unknown</span>
+                            <button class="btn btn-primary" id="btn-analyze" onclick="triggerAIAnalysis()" style="padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: 8px;">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i> Run Analysis
+                            </button>
+                        </div>
                     </div>
                     <div class="card-body ai-body">
                         <!-- Spinner for loading state -->

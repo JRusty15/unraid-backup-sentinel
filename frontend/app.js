@@ -33,6 +33,10 @@ function switchTab(tabId) {
         titleEl.textContent = 'Operational Overview';
         subtitleEl.textContent = 'Real-time status of backups and storage array integrity.';
         refreshDashboardData();
+    } else if (tabId === 'ai') {
+        titleEl.textContent = 'AI Sentinel Diagnostics';
+        subtitleEl.textContent = 'AI-driven analysis of storage arrays, file structures, and backup integrity.';
+        loadLatestAIAnalysis();
     } else if (tabId === 'syslog') {
         titleEl.textContent = 'Logs & Syslog Inspector';
         subtitleEl.textContent = 'Raw output streams from server syslogs and backup tasks.';
@@ -50,10 +54,7 @@ function switchTab(tabId) {
 
 // Refresh Dashboard Data
 async function refreshDashboardData() {
-    await Promise.all([
-        loadBackupStatuses(),
-        loadLatestAIAnalysis()
-    ]);
+    await loadBackupStatuses();
 }
 
 // Helper to escape HTML characters
@@ -187,7 +188,7 @@ async function loadLatestAIAnalysis() {
             timestampEl.textContent = 'Last updated: Never';
             statusBadge.textContent = 'Unknown';
             statusBadge.className = 'ai-badge unknown';
-            contentEl.innerHTML = '<p>No analysis reports found. Click "AI Analysis" at the top right to start your first diagnostics run.</p>';
+            contentEl.innerHTML = '<p>No analysis reports found. Click "Run Analysis" in the card header to start your first diagnostics run.</p>';
             return;
         }
         
@@ -253,7 +254,7 @@ async function triggerAIAnalysis() {
                 if (elapsedSec < 15 || attempts > 20) {
                     clearInterval(interval);
                     btn.disabled = false;
-                    btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> AI Analysis';
+                    btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Run Analysis';
                     loadingEl.style.display = 'none';
                     contentEl.style.display = 'block';
                     loadLatestAIAnalysis();
@@ -334,6 +335,8 @@ function refreshData() {
     setTimeout(async () => {
         if (currentTab === 'dashboard') {
             await refreshDashboardData();
+        } else if (currentTab === 'ai') {
+            await loadLatestAIAnalysis();
         } else if (currentTab === 'syslog') {
             await loadRawLogs();
         } else if (currentTab === 'tokens') {
