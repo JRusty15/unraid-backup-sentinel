@@ -640,6 +640,7 @@ async def probe_docker_services():
         
     for s in services:
         service_id = s["id"]
+        name = s["name"]
         c_name = s["container_name"]
         host_ip = s["host_ip"]
         port = s["port"]

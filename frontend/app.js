@@ -136,6 +136,9 @@ async function loadBackupStatuses() {
             if (emptyState) emptyState.style.display = 'none';
         }
 
+        // Sort backups alphabetically by ID
+        data.sort((a, b) => a.id.localeCompare(b.id));
+
         let systemHealth = 'healthy';
         let rsyncCount = 0;
         let duplicacyCount = 0;
@@ -492,6 +495,9 @@ async function loadDockerStatus() {
         
         let latestTime = null;
         
+        // Sort Docker services alphabetically by name
+        data.sort((a, b) => a.name.localeCompare(b.name));
+        
         data.forEach(service => {
             const id = service.id;
             const name = service.name;
@@ -670,4 +676,13 @@ async function removeDockerService(serviceId) {
 // Initial Bootstrap load
 window.addEventListener('DOMContentLoaded', () => {
     refreshDashboardData();
+    
+    // Auto-refresh active panel data every 10 seconds
+    setInterval(() => {
+        if (currentTab === 'dashboard') {
+            loadBackupStatuses();
+        } else if (currentTab === 'docker') {
+            loadDockerStatus();
+        }
+    }, 10000);
 });
