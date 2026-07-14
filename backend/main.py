@@ -104,14 +104,6 @@ def init_db():
             )
         """)
         
-        # Populate initial empty states if they don't exist
-        for backup_id in ["local_rsync"]:
-            cursor = conn.execute("SELECT 1 FROM backups WHERE id = ?", (backup_id,))
-            if not cursor.fetchone():
-                conn.execute(
-                    "INSERT INTO backups (id, status, last_run, message, heartbeat_hours) VALUES (?, ?, ?, ?, ?)",
-                    (backup_id, "unknown", datetime.datetime.now(datetime.timezone.utc).isoformat(), "No backup reports received yet.", None)
-                )
         conn.commit()
     logger.info("Database initialized successfully.")
 
