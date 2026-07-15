@@ -774,6 +774,10 @@ async def probe_docker_services():
                 if has_error:
                     if any(noise in lower_line for noise in ["0 errors", "no error", "0 failed", "no failed", "error: null", "errorcode: 0", "errors=ignore"]):
                         has_error = False
+                    elif "debug" in lower_line or "trace" in lower_line or "verbose" in lower_line:
+                        has_error = False
+                    elif lower_line.startswith("d! ") or " d! " in lower_line:
+                        has_error = False
                 
                 if has_error:
                     is_new_error = True
