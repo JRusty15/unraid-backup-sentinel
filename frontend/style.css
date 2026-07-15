@@ -864,22 +864,106 @@ body {
 
 /* Docker Monitoring Styles */
 .docker-card {
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+    padding: 0.85rem 1.25rem !important;
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    height: fit-content;
+    gap: 0;
+}
+
+.docker-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px hsla(0, 0%, 0%, 0.4);
+    border-color: var(--border-active);
+}
+
+.docker-card-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 28px;
+    user-select: none;
+}
+
+.docker-card-title-group {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+}
+
+.docker-card-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.expand-chevron {
+    color: var(--text-secondary);
+    transition: transform 0.3s ease;
+    font-size: 0.85rem;
+}
+
+.docker-card.expanded .expand-chevron {
+    transform: rotate(180deg);
+    color: var(--text-primary);
+}
+
+/* Expanded Card Body Details */
+.docker-card-details {
+    display: none;
+    flex-direction: column;
+    gap: 1rem;
+    margin-top: 1rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--border-card);
+    cursor: default;
+}
+
+.docker-card.expanded .docker-card-details {
+    display: flex;
+}
+
+/* Status Indicator Dots */
+.status-indicator-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    box-shadow: 0 0 10px currentColor;
+    flex-shrink: 0;
+}
+.status-indicator-dot.success {
+    background-color: var(--color-success);
+    color: var(--color-success);
+}
+.status-indicator-dot.warning {
+    background-color: var(--color-warning);
+    color: var(--color-warning);
+}
+.status-indicator-dot.failed {
+    background-color: var(--color-failed);
+    color: var(--color-failed);
+}
+.status-indicator-dot.unknown {
+    background-color: var(--text-secondary);
+    color: var(--text-secondary);
 }
 
 .docker-status-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 1px solid var(--border-card);
-    padding-bottom: 0.75rem;
 }
 
 .docker-badges {
     display: flex;
     gap: 0.5rem;
+    width: 100%;
 }
 
 .docker-badge {
@@ -923,30 +1007,7 @@ body {
     gap: 0.25rem;
 }
 
-.docker-log-toggle {
-    background: none;
-    border: 1px solid var(--border-card);
-    color: var(--text-secondary);
-    font-size: 0.8rem;
-    font-weight: 600;
-    padding: 0.5rem 0.75rem;
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    transition: all 0.2s ease;
-}
-
-.docker-log-toggle:hover {
-    background-color: hsla(220, 15%, 20%, 0.3);
-    color: var(--text-primary);
-    border-color: var(--border-active);
-}
-
 .docker-log-panel {
-    display: none;
     background-color: hsla(220, 20%, 5%, 0.6);
     border: 1px solid var(--border-card);
     border-radius: 8px;
@@ -978,4 +1039,25 @@ body {
 .btn-remove-service:hover {
     color: var(--color-failed);
     background-color: hsla(355, 85%, 55%, 0.1);
+}
+
+.btn-ack-service {
+    background: none;
+    border: none;
+    color: var(--color-warning);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    transition: all 0.2s ease;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.btn-ack-service:hover {
+    color: var(--color-success);
+    background-color: hsla(142, 70%, 45%, 0.1);
+    transform: scale(1.03);
 }

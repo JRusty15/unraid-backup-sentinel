@@ -115,9 +115,16 @@ def init_db():
                 api_health TEXT NOT NULL,
                 last_run TEXT,
                 message TEXT,
-                log_snippet TEXT
+                log_snippet TEXT,
+                acknowledged_at TEXT
             )
         """)
+        
+        # Migration for existing databases: add acknowledged_at column
+        try:
+            conn.execute("ALTER TABLE docker_services ADD COLUMN acknowledged_at TEXT")
+        except sqlite3.OperationalError:
+            pass # Column already exists
         
         # Populate initial Plex docker service if it doesn't exist
         cursor = conn.execute("SELECT 1 FROM docker_services WHERE id = ?", ("plex",))
@@ -239,7 +246,7 @@ def query_docker_logs(container_name: str, tail: int = 30) -> str:
         s.settimeout(3.0)
         s.connect(socket_path)
         
-        path = f"/containers/{container_name}/logs?stdout=true&stderr=true&tail={tail}"
+        path = f"/containers/{container_name}/logs?stdout=true&stderr=true&timestamps=true&tail={tail}"
         request = f"GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
         s.sendall(request.encode("utf-8"))
         
@@ -716,18 +723,51 @@ async def probe_docker_services():
                     api_health = "unresponsive"
                     message = f"Port check failed: {str(e)}"
                     
-        # 2.5 Scan logs for critical errors if container is running (Chronological recovery checks)
+        # 2.5 Scan logs for critical errors if container is running (Chronological recovery & Acknowledgment checks)
         if container_status == "running" and log_snippet:
             error_keywords = ["error", "critical", "fatal", "malformed", "corruption", "failed", "panic"]
             recovery_keywords = ["success", "successful", "recovered", "connected", "ready", "listening", "online", "established", "present"]
             
+            # Fetch user acknowledgment timestamp
+            ack_str = s.get("acknowledged_at")
+            acknowledged_at = None
+            if ack_str:
+                try:
+                    acknowledged_at = datetime.datetime.fromisoformat(ack_str)
+                    if acknowledged_at.tzinfo is None:
+                        acknowledged_at = acknowledged_at.replace(tzinfo=datetime.timezone.utc)
+                except Exception:
+                    pass
+            
+            clean_log_lines = []
+            error_lines = []
             last_error_idx = -1
             last_recovery_idx = -1
-            error_lines = []
             
             lines = log_snippet.splitlines()
             for idx, line in enumerate(lines):
-                lower_line = line.lower()
+                line_content = line
+                line_ts = None
+                
+                parts = line.split(" ", 1)
+                if len(parts) >= 2:
+                    ts_candidate = parts[0]
+                    # Verify if matches basic ISO datetime signature: YYYY-MM-DDTHH...
+                    if len(ts_candidate) >= 20 and ts_candidate[4] == "-" and ts_candidate[10] == "T":
+                        try:
+                            if "." in ts_candidate:
+                                base, frac = ts_candidate.split(".", 1)
+                                frac_digits = "".join(c for c in frac if c.isdigit())
+                                clean_ts = f"{base}.{frac_digits[:6]}+00:00"
+                            else:
+                                clean_ts = ts_candidate.replace("Z", "+00:00")
+                            line_ts = datetime.datetime.fromisoformat(clean_ts)
+                            line_content = parts[1]
+                        except Exception:
+                            pass
+                            
+                clean_log_lines.append(line_content)
+                lower_line = line_content.lower()
                 
                 # Check for errors
                 has_error = any(kw in lower_line for kw in error_keywords)
@@ -736,21 +776,28 @@ async def probe_docker_services():
                         has_error = False
                 
                 if has_error:
-                    last_error_idx = idx
-                    error_lines.append(line.strip())
-                    
+                    is_new_error = True
+                    if line_ts and acknowledged_at:
+                        if line_ts <= acknowledged_at:
+                            is_new_error = False
+                            
+                    if is_new_error:
+                        last_error_idx = idx
+                        error_lines.append(line_content.strip())
+                        
                 # Check for recovery
                 if any(kw in lower_line for kw in recovery_keywords):
                     last_recovery_idx = idx
             
+            # Put clean logs (without timestamps) back into display snippet
+            log_snippet = "\n".join(clean_log_lines)
+            
             # If errors found, check if a recovery message appeared later in the logs
             if error_lines:
                 if last_recovery_idx > last_error_idx:
-                    # It recovered!
                     if api_health == "healthy":
                         message = f"Resolved: container recovered from log errors."
                 else:
-                    # Active error!
                     if api_health == "healthy":
                         api_health = "warning"
                         most_recent_err = error_lines[-1]
@@ -1087,6 +1134,28 @@ def discover_docker_services():
         asyncio.create_task(probe_docker_services())
         
     return {"message": f"Successfully discovered and added {len(discovered)} services.", "discovered": discovered}
+
+@app.post("/api/docker/service/{service_id}/acknowledge")
+def acknowledge_docker_service(service_id: str):
+    try:
+        now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with get_db() as conn:
+            cursor = conn.execute("SELECT name FROM docker_services WHERE id = ?", (service_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Service not found.")
+            
+            # Reset health state and set the timestamp of user acknowledgment
+            conn.execute(
+                "UPDATE docker_services SET acknowledged_at = ?, api_health = 'healthy', message = 'Alert acknowledged by user.' WHERE id = ?",
+                (now_str, service_id)
+            )
+            conn.commit()
+        logger.info("Docker service '%s' alerts acknowledged by user.", service_id)
+        return {"message": f"Successfully acknowledged alerts for '{service_id}'."}
+    except Exception as e:
+        logger.error("Failed to acknowledge Docker service: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/docker/service/{service_id}")
 def delete_docker_service(service_id: str):

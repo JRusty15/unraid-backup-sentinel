@@ -3,6 +3,7 @@
 // State variables
 let currentTab = 'dashboard';
 const API_BASE = ''; // Same host
+const expandedCards = new Set();
 
 // Tab Switcher
 function switchTab(tabId) {
@@ -535,41 +536,45 @@ async function loadDockerStatus() {
             const offset = (statusClass === 'unknown') ? '314' : '0';
             const card = document.createElement('div');
             card.className = 'card status-card docker-card';
+            card.id = `docker-card-${id}`;
+            
+            // Retain card expansion state during auto-polling re-renders
+            if (expandedCards.has(id)) {
+                card.classList.add('expanded');
+            }
+            
             card.innerHTML = `
-                <div class="docker-status-header">
-                    <h3 style="margin: 0; font-size: 1.1rem;">${escapeHtml(name)}</h3>
-                    <div class="docker-badges" style="display: flex; align-items: center; gap: 0.5rem;">
-                        <span class="docker-badge ${status}">${escapeHtml(status)}</span>
-                        <span class="docker-badge ${apiHealth}">${escapeHtml(apiHealth)}</span>
-                        <button class="btn-remove-service" onclick="removeDockerService('${id}')" title="Stop monitoring this container">
-                            <i class="fa-solid fa-trash-can"></i>
-                        </button>
+                <div class="docker-card-summary" onclick="toggleDockerCardExpand('${id}')">
+                    <div class="docker-card-title-group">
+                        <span class="status-indicator-dot ${statusClass}"></span>
+                        <h4 class="docker-card-title">${escapeHtml(name)}</h4>
                     </div>
+                    <i class="fa-solid fa-chevron-down expand-chevron"></i>
                 </div>
                 
-                <div class="card-body status-body" style="padding: 0; flex-grow: 0;">
-                    <div class="ring-container">
-                        <svg class="status-ring" viewBox="0 0 120 120">
-                            <circle class="ring-bg" cx="60" cy="60" r="50" />
-                            <circle class="ring-fg ${statusClass}" cx="60" cy="60" r="50" style="stroke-dashoffset: ${offset};" />
-                        </svg>
-                        <div class="ring-inner">
-                            <i class="${iconClass} status-icon" style="color: ${iconColor};"></i>
+                <div class="docker-card-details" onclick="event.stopPropagation()">
+                    <div class="docker-status-header" style="border: none; padding: 0;">
+                        <div class="docker-badges" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                            <span class="docker-badge ${status}">${escapeHtml(status)}</span>
+                            <span class="docker-badge ${apiHealth}">${escapeHtml(apiHealth)}</span>
+                            ${(statusClass === 'warning' || statusClass === 'failed') ? `
+                                <button class="btn-ack-service" onclick="acknowledgeDockerService('${id}')" title="Clear alerts & acknowledge current warnings/errors">
+                                    <i class="fa-solid fa-circle-check"></i> Clear Alert
+                                </button>
+                            ` : ''}
+                            <button class="btn-remove-service" onclick="removeDockerService('${id}')" title="Stop monitoring this container" style="margin-left: auto;">
+                                <i class="fa-solid fa-trash-can"></i> Delete
+                            </button>
                         </div>
                     </div>
-                    <div class="status-details">
-                        <p class="timestamp-label" style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">${escapeHtml(message)}</p>
-                        <div class="docker-meta">
-                            <span><i class="fa-solid fa-link" style="width: 14px; font-size: 0.75rem;"></i> Connection: ${escapeHtml(hostIp)}:${port}</span>
-                            <span><i class="fa-solid fa-box" style="width: 14px; font-size: 0.75rem;"></i> Container: ${escapeHtml(cName)}</span>
-                        </div>
+                    
+                    <p class="timestamp-label" style="font-weight: 600; color: var(--text-primary); margin: 0;">${escapeHtml(message)}</p>
+                    
+                    <div class="docker-meta" style="margin-top: -0.25rem;">
+                        <span><i class="fa-solid fa-link" style="width: 14px; font-size: 0.75rem;"></i> Connection: ${escapeHtml(hostIp)}:${port}</span>
+                        <span><i class="fa-solid fa-box" style="width: 14px; font-size: 0.75rem;"></i> Container: ${escapeHtml(cName)}</span>
                     </div>
-                </div>
-                
-                <div style="display: flex; flex-direction: column; gap: 0.75rem; width: 100%;">
-                    <button class="docker-log-toggle" id="btn-toggle-${id}" onclick="toggleDockerLogs('${id}')">
-                        <i class="fa-solid fa-terminal"></i> Show Container Logs
-                    </button>
+                    
                     <div class="docker-log-panel" id="log-panel-${id}">${escapeHtml(logs)}</div>
                 </div>
             `;
@@ -590,21 +595,21 @@ async function loadDockerStatus() {
     }
 }
 
-// Toggle raw container logs display in cards
-function toggleDockerLogs(serviceId) {
-    const panel = document.getElementById(`log-panel-${serviceId}`);
-    const btn = document.getElementById(`btn-toggle-${serviceId}`);
-    if (!panel || !btn) return;
+// Toggle Docker card expansion state
+function toggleDockerCardExpand(serviceId) {
+    const card = document.getElementById(`docker-card-${serviceId}`);
+    if (!card) return;
     
-    if (panel.style.display === 'block') {
-        panel.style.display = 'none';
-        btn.innerHTML = '<i class="fa-solid fa-terminal"></i> Show Container Logs';
-        btn.classList.remove('active');
+    const isExpanded = card.classList.toggle('expanded');
+    if (isExpanded) {
+        expandedCards.add(serviceId);
+        // Scroll logs to bottom immediately upon expansion
+        const panel = document.getElementById(`log-panel-${serviceId}`);
+        if (panel) {
+            panel.scrollTop = panel.scrollHeight;
+        }
     } else {
-        panel.style.display = 'block';
-        btn.innerHTML = '<i class="fa-solid fa-terminal"></i> Hide Container Logs';
-        btn.classList.add('active');
-        panel.scrollTop = panel.scrollHeight; 
+        expandedCards.delete(serviceId);
     }
 }
 
@@ -670,6 +675,19 @@ async function removeDockerService(serviceId) {
         await loadDockerStatus();
     } catch (err) {
         alert("Failed to remove service: " + err.message);
+    }
+}
+
+// Acknowledge warnings or errors for a service
+async function acknowledgeDockerService(serviceId) {
+    try {
+        const res = await fetch(`${API_BASE}/api/docker/service/${serviceId}/acknowledge`, { method: 'POST' });
+        if (!res.ok) throw new Error('API acknowledgment call failed');
+        const data = await res.json();
+        
+        await loadDockerStatus();
+    } catch (err) {
+        alert("Failed to clear alerts: " + err.message);
     }
 }
 
