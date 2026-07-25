@@ -4,6 +4,7 @@
 let currentTab = 'dashboard';
 const API_BASE = ''; // Same host
 const expandedCards = new Set();
+const aiAnalysisCache = new Map();
 
 // Tab Switcher
 function switchTab(tabId) {
@@ -547,6 +548,11 @@ async function loadDockerStatus() {
             const ignorePatternsStr = service.ignore_patterns || '';
             const ignorePatterns = ignorePatternsStr.split(',').filter(p => p.trim().length > 0);
             
+            // Retrieve cached AI analysis if exists
+            const cachedAnalysis = aiAnalysisCache.get(id);
+            const aiDisplay = cachedAnalysis ? 'block' : 'none';
+            const aiText = cachedAnalysis ? parseSimpleMarkdown(cachedAnalysis) : '';
+            
             card.innerHTML = `
                 <div class="docker-card-summary" onclick="toggleDockerCardExpand('${id}')">
                     <div class="docker-card-title-group">
@@ -582,11 +588,11 @@ async function loadDockerStatus() {
                     <div class="docker-log-panel" id="log-panel-${id}">${escapeHtml(logs)}</div>
                     
                     <!-- AI Diagnostics Explanation Container -->
-                    <div id="ai-analysis-container-${id}" style="display: none; background: hsla(262, 85%, 65%, 0.05); border: 1px solid hsla(262, 85%, 65%, 0.2); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem;">
+                    <div id="ai-analysis-container-${id}" style="display: ${aiDisplay}; background: hsla(262, 85%, 65%, 0.05); border: 1px solid hsla(262, 85%, 65%, 0.2); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem;">
                         <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; color: hsl(262, 85%, 65%); font-weight: 600; font-size: 0.95rem;">
                             <i class="fa-solid fa-brain"></i> AI Diagnostics Explanation
                         </div>
-                        <div id="ai-analysis-text-${id}" class="markdown-body" style="font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary); text-align: left;"></div>
+                        <div id="ai-analysis-text-${id}" class="markdown-body" style="font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary); text-align: left;">${aiText}</div>
                     </div>
                     
                     <!-- Diagnostics & Mute Actions Row -->
@@ -746,8 +752,14 @@ async function analyzeLogsWithAI(serviceId) {
         if (!res.ok) throw new Error('API analysis call failed');
         const data = await res.json();
         
+        // Cache the analysis text globally
+        aiAnalysisCache.set(serviceId, data.analysis);
+        
         textEl.innerHTML = parseSimpleMarkdown(data.analysis);
         container.style.display = 'block';
+        
+        // Smooth scroll to make sure the explanation is in view
+        container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (err) {
         alert("Failed to analyze logs: " + err.message);
     } finally {
