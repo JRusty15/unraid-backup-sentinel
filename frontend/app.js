@@ -10,6 +10,7 @@ const aiAnalysisCache = {
     set: (id, val) => localStorage.setItem(`ai_analysis_${id}`, val),
     has: (id) => localStorage.getItem(`ai_analysis_${id}`) !== null
 };
+const activeAnalyses = new Set();
 
 // Tab Switcher
 function switchTab(tabId) {
@@ -745,9 +746,10 @@ async function acknowledgeDockerService(serviceId) {
 // Analyze specific Docker service logs using AI
 async function analyzeLogsWithAI(serviceId) {
     const btn = document.getElementById(`btn-ai-analyze-${serviceId}`);
-    const container = document.getElementById(`ai-analysis-container-${serviceId}`);
-    const textEl = document.getElementById(`ai-analysis-text-${serviceId}`);
-    if (!btn || !container || !textEl) return;
+    if (!btn) return;
+    
+    // Add to active analyses to block auto-polling re-renders
+    activeAnalyses.add(serviceId);
     
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Analyzing Logs...';
@@ -760,16 +762,25 @@ async function analyzeLogsWithAI(serviceId) {
         // Cache the analysis text globally
         aiAnalysisCache.set(serviceId, data.analysis);
         
-        textEl.innerHTML = parseSimpleMarkdown(data.analysis);
-        container.style.display = 'block';
-        
-        // Smooth scroll to make sure the explanation is in view
-        container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // Retrieve fresh DOM elements from active document (prevents stale reference updates)
+        const container = document.getElementById(`ai-analysis-container-${serviceId}`);
+        const textEl = document.getElementById(`ai-analysis-text-${serviceId}`);
+        if (container && textEl) {
+            textEl.innerHTML = parseSimpleMarkdown(data.analysis);
+            container.style.display = 'block';
+            container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
     } catch (err) {
         alert("Failed to analyze logs: " + err.message);
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fa-solid fa-brain"></i> Analyze Logs with AI';
+        activeAnalyses.delete(serviceId);
+        
+        // Get fresh reference to button to restore status
+        const freshBtn = document.getElementById(`btn-ai-analyze-${serviceId}`);
+        if (freshBtn) {
+            freshBtn.disabled = false;
+            freshBtn.innerHTML = '<i class="fa-solid fa-brain"></i> Analyze Logs with AI';
+        }
     }
 }
 
@@ -863,8 +874,9 @@ function parseSimpleMarkdown(mdText) {
 window.addEventListener('DOMContentLoaded', () => {
     refreshDashboardData();
     
-    // Auto-refresh active panel data every 10 seconds
+    // Auto-refresh active panel data every 10 seconds (skip if any active AI diagnostics is running)
     setInterval(() => {
+        if (activeAnalyses.size > 0) return;
         if (currentTab === 'dashboard') {
             loadBackupStatuses();
         } else if (currentTab === 'docker') {
