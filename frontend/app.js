@@ -4,7 +4,12 @@
 let currentTab = 'dashboard';
 const API_BASE = ''; // Same host
 const expandedCards = new Set();
-const aiAnalysisCache = new Map();
+// Persist AI analysis across page reloads using localStorage
+const aiAnalysisCache = {
+    get: (id) => localStorage.getItem(`ai_analysis_${id}`),
+    set: (id, val) => localStorage.setItem(`ai_analysis_${id}`, val),
+    has: (id) => localStorage.getItem(`ai_analysis_${id}`) !== null
+};
 
 // Tab Switcher
 function switchTab(tabId) {
@@ -838,10 +843,10 @@ function parseSimpleMarkdown(mdText) {
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong style="color: var(--text-primary);">$1</strong>');
     
     // Code blocks
-    html = html.replace(/```([\s\S]*?)```/g, '<pre style="background: hsla(0,0%,0%,0.35); padding: 0.5rem; border-radius: 4px; font-family: monospace; font-size: 0.75rem; overflow-x: auto; color: var(--text-primary); margin: 0.5rem 0; border: 1px solid var(--border-card);">$1</pre>');
+    html = html.replace(/```([\s\S]*?)```/g, '<pre style="background: hsla(0,0%,0%,0.35); padding: 0.5rem; border-radius: 4px; font-family: monospace; font-size: 0.75rem; white-space: pre-wrap; word-break: break-all; color: var(--text-primary); margin: 0.5rem 0; border: 1px solid var(--border-card);">$1</pre>');
     
     // Inline code
-    html = html.replace(/`(.*?)`/g, '<code style="background: hsla(0,0%,0%,0.2); padding: 2px 4px; border-radius: 3px; font-family: monospace; font-size: 0.75rem; color: hsl(200, 80%, 75%);">$1</code>');
+    html = html.replace(/`(.*?)`/g, '<code style="background: hsla(0,0%,0%,0.2); padding: 2px 4px; border-radius: 3px; font-family: monospace; font-size: 0.75rem; white-space: pre-wrap; word-break: break-word; color: hsl(200, 80%, 75%);">$1</code>');
     
     // Lists
     html = html.replace(/^\* (.*$)/gim, '<li style="margin-left: 1rem; list-style-type: disc; margin-bottom: 0.25rem; text-align: left;">$1</li>');

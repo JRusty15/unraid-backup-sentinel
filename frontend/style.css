@@ -1061,3 +1061,26 @@ body {
     background-color: hsla(142, 70%, 45%, 0.1);
     transform: scale(1.03);
 }
+
+/* Make expanded card span full width of the grid drawer for spacious terminal/AI viewports */
+.docker-card.expanded {
+    grid-column: 1 / -1;
+}
+
+/* Force word-wrapping inside the AI analysis box to eliminate horizontal scrollbars */
+.markdown-body {
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+}
+
+.markdown-body * {
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+}
+
+.markdown-body pre {
+    white-space: pre-wrap !important;
+    word-break: break-all !important;
+}
