@@ -543,6 +543,10 @@ async function loadDockerStatus() {
                 card.classList.add('expanded');
             }
             
+            // Parse ignore patterns list
+            const ignorePatternsStr = service.ignore_patterns || '';
+            const ignorePatterns = ignorePatternsStr.split(',').filter(p => p.trim().length > 0);
+            
             card.innerHTML = `
                 <div class="docker-card-summary" onclick="toggleDockerCardExpand('${id}')">
                     <div class="docker-card-title-group">
@@ -576,6 +580,43 @@ async function loadDockerStatus() {
                     </div>
                     
                     <div class="docker-log-panel" id="log-panel-${id}">${escapeHtml(logs)}</div>
+                    
+                    <!-- AI Diagnostics Explanation Container -->
+                    <div id="ai-analysis-container-${id}" style="display: none; background: hsla(262, 85%, 65%, 0.05); border: 1px solid hsla(262, 85%, 65%, 0.2); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; color: hsl(262, 85%, 65%); font-weight: 600; font-size: 0.95rem;">
+                            <i class="fa-solid fa-brain"></i> AI Diagnostics Explanation
+                        </div>
+                        <div id="ai-analysis-text-${id}" class="markdown-body" style="font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary); text-align: left;"></div>
+                    </div>
+                    
+                    <!-- Diagnostics & Mute Actions Row -->
+                    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem;">
+                        <button class="btn btn-secondary" onclick="analyzeLogsWithAI('${id}')" id="btn-ai-analyze-${id}" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; background-color: hsla(262, 85%, 65%, 0.1); border-color: hsla(262, 85%, 65%, 0.3); color: hsl(262, 85%, 65%); flex-grow: 1;">
+                            <i class="fa-solid fa-brain"></i> Analyze Logs with AI
+                        </button>
+                        <button class="btn btn-secondary" onclick="toggleIgnorePatternUI('${id}')" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; flex-grow: 1;">
+                            <i class="fa-solid fa-filter-circle-xmark"></i> Mute Log Alert
+                        </button>
+                    </div>
+                    
+                    <!-- Ignore Pattern Form -->
+                    <div id="ignore-pattern-ui-${id}" style="display: none; flex-direction: column; gap: 0.5rem; border: 1px dashed var(--border-card); padding: 0.75rem; border-radius: 6px; background-color: hsla(220, 15%, 15%, 0.2);">
+                        <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-primary); text-align: left;">Mute alerts for matching strings (case-insensitive):</div>
+                        <div style="display: flex; gap: 0.5rem; width: 100%;">
+                            <input type="text" id="input-ignore-${id}" placeholder="e.g. parsing size failed" style="flex-grow: 1; font-size: 0.75rem; padding: 0.4rem; background: var(--bg-body); border: 1px solid var(--border-card); border-radius: 4px; color: var(--text-primary);">
+                            <button class="btn btn-secondary" onclick="addIgnorePattern('${id}')" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; background: var(--color-success); border: none; color: white;">Add</button>
+                        </div>
+                        <div id="ignore-patterns-list-${id}" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.25rem; text-align: left;">
+                            ${ignorePatterns.length === 0 ? '<span style="font-size: 0.7rem; color: var(--text-muted);">No muted patterns yet.</span>' : 
+                                ignorePatterns.map(p => `
+                                    <span class="docker-badge" style="background-color: hsla(0, 0%, 20%, 0.6); color: var(--text-secondary); display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.7rem; border: 1px solid var(--border-card); padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: none;">
+                                        "${escapeHtml(p)}"
+                                        <i class="fa-solid fa-xmark" onclick="removeIgnorePattern('${id}', '${p}')" style="cursor: pointer; color: var(--color-failed); font-size: 0.75rem;"></i>
+                                    </span>
+                                `).join('')
+                            }
+                        </div>
+                    </div>
                 </div>
             `;
             container.appendChild(card);
@@ -690,7 +731,117 @@ async function acknowledgeDockerService(serviceId) {
         alert("Failed to clear alerts: " + err.message);
     }
 }
+// Analyze specific Docker service logs using AI
+async function analyzeLogsWithAI(serviceId) {
+    const btn = document.getElementById(`btn-ai-analyze-${serviceId}`);
+    const container = document.getElementById(`ai-analysis-container-${serviceId}`);
+    const textEl = document.getElementById(`ai-analysis-text-${serviceId}`);
+    if (!btn || !container || !textEl) return;
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Analyzing Logs...';
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/docker/service/${serviceId}/analyze`, { method: 'POST' });
+        if (!res.ok) throw new Error('API analysis call failed');
+        const data = await res.json();
+        
+        textEl.innerHTML = parseSimpleMarkdown(data.analysis);
+        container.style.display = 'block';
+    } catch (err) {
+        alert("Failed to analyze logs: " + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-brain"></i> Analyze Logs with AI';
+    }
+}
 
+// Toggle display of ignore patterns UI form
+function toggleIgnorePatternUI(serviceId) {
+    const panel = document.getElementById(`ignore-pattern-ui-${serviceId}`);
+    if (!panel) return;
+    panel.style.display = (panel.style.display === 'none') ? 'flex' : 'none';
+}
+
+// Add a permanent ignore log string pattern
+async function addIgnorePattern(serviceId) {
+    const input = document.getElementById(`input-ignore-${serviceId}`);
+    if (!input || !input.value.trim()) return;
+    
+    const pattern = input.value.trim();
+    try {
+        const res = await fetch(`${API_BASE}/api/docker/service/${serviceId}/ignore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pattern })
+        });
+        if (!res.ok) throw new Error('Failed to save ignore pattern');
+        
+        input.value = '';
+        await loadDockerStatus();
+        
+        // Retain ignore UI visibility after reload
+        setTimeout(() => {
+            const panel = document.getElementById(`ignore-pattern-ui-${serviceId}`);
+            if (panel) panel.style.display = 'flex';
+        }, 100);
+        
+    } catch (err) {
+        alert("Failed to add ignore pattern: " + err.message);
+    }
+}
+
+// Remove an ignored pattern
+async function removeIgnorePattern(serviceId, pattern) {
+    try {
+        const res = await fetch(`${API_BASE}/api/docker/service/${serviceId}/ignore?pattern=${encodeURIComponent(pattern)}`, {
+            method: 'DELETE'
+        });
+        if (!res.ok) throw new Error('Failed to delete ignore pattern');
+        
+        await loadDockerStatus();
+        
+        // Retain ignore UI visibility after reload
+        setTimeout(() => {
+            const panel = document.getElementById(`ignore-pattern-ui-${serviceId}`);
+            if (panel) panel.style.display = 'flex';
+        }, 100);
+        
+    } catch (err) {
+        alert("Failed to remove ignore pattern: " + err.message);
+    }
+}
+
+// Simple client-side Markdown formatter
+function parseSimpleMarkdown(mdText) {
+    if (!mdText) return '';
+    let html = mdText;
+    
+    // Headers
+    html = html.replace(/^### (.*$)/gim, '<h5 style="margin-top: 0.75rem; margin-bottom: 0.4rem; color: var(--text-primary); font-size: 0.85rem; text-align: left;">$1</h5>');
+    html = html.replace(/^## (.*$)/gim, '<h4 style="margin-top: 0.75rem; margin-bottom: 0.4rem; color: var(--text-primary); font-size: 0.9rem; text-align: left;">$1</h4>');
+    html = html.replace(/^# (.*$)/gim, '<h3 style="margin-top: 0.75rem; margin-bottom: 0.4rem; color: var(--text-primary); font-size: 0.95rem; text-align: left;">$1</h3>');
+    
+    // Bold
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong style="color: var(--text-primary);">$1</strong>');
+    
+    // Code blocks
+    html = html.replace(/```([\s\S]*?)```/g, '<pre style="background: hsla(0,0%,0%,0.35); padding: 0.5rem; border-radius: 4px; font-family: monospace; font-size: 0.75rem; overflow-x: auto; color: var(--text-primary); margin: 0.5rem 0; border: 1px solid var(--border-card);">$1</pre>');
+    
+    // Inline code
+    html = html.replace(/`(.*?)`/g, '<code style="background: hsla(0,0%,0%,0.2); padding: 2px 4px; border-radius: 3px; font-family: monospace; font-size: 0.75rem; color: hsl(200, 80%, 75%);">$1</code>');
+    
+    // Lists
+    html = html.replace(/^\* (.*$)/gim, '<li style="margin-left: 1rem; list-style-type: disc; margin-bottom: 0.25rem; text-align: left;">$1</li>');
+    html = html.replace(/^- (.*$)/gim, '<li style="margin-left: 1rem; list-style-type: disc; margin-bottom: 0.25rem; text-align: left;">$1</li>');
+    html = html.replace(/^\d+\.\s+(.*$)/gim, '<li style="margin-left: 1rem; list-style-type: decimal; margin-bottom: 0.25rem; text-align: left;">$1</li>');
+    
+    // Paragraph spacing / double breaks
+    html = html.replace(/\n\n/g, '<br><br>');
+    html = html.replace(/\n/g, '<br>');
+    
+    return html;
+}
 // Initial Bootstrap load
 window.addEventListener('DOMContentLoaded', () => {
     refreshDashboardData();

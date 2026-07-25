@@ -15,7 +15,7 @@ services:
       - LOG_DIR_DUPLICACY=/app/logs/duplicacy
       - LOG_DIR_RSYNC=/app/logs/rsync
       - HEARTBEAT_RSYNC_HOURS=26
-      - HEARTBEAT_DUPLICACY_HOURS=26
+      - HEARTBEAT_DUPLICACY_HOURS=240
       - DB_PATH=/app/data/sentinel.db
     volumes:
       # --- UNRAID CONFIGURATION (Uncomment these on your Unraid Server) ---

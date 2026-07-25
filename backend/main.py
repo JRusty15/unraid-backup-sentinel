@@ -31,7 +31,7 @@ PORT = int(os.getenv("PORT", "8080"))
 
 # Heartbeat configuration (stale warning time in hours)
 HEARTBEAT_RSYNC_HOURS = int(os.getenv("HEARTBEAT_RSYNC_HOURS", "26"))
-HEARTBEAT_DUPLICACY_HOURS = int(os.getenv("HEARTBEAT_DUPLICACY_HOURS", "26"))
+HEARTBEAT_DUPLICACY_HOURS = int(os.getenv("HEARTBEAT_DUPLICACY_HOURS", "240"))
 
 # Cost tracking constants (Gemini 1.5 Flash prices)
 # Input: $0.075 / 1M tokens ($0.000000075 per token)
@@ -116,13 +116,20 @@ def init_db():
                 last_run TEXT,
                 message TEXT,
                 log_snippet TEXT,
-                acknowledged_at TEXT
+                acknowledged_at TEXT,
+                ignore_patterns TEXT
             )
         """)
         
         # Migration for existing databases: add acknowledged_at column
         try:
             conn.execute("ALTER TABLE docker_services ADD COLUMN acknowledged_at TEXT")
+        except sqlite3.OperationalError:
+            pass # Column already exists
+            
+        # Migration for existing databases: add ignore_patterns column
+        try:
+            conn.execute("ALTER TABLE docker_services ADD COLUMN ignore_patterns TEXT")
         except sqlite3.OperationalError:
             pass # Column already exists
         
@@ -353,43 +360,46 @@ def get_duplicacy_recent_logs() -> str:
         return "Duplicacy log directory not found."
         
     try:
-        # Check if a 'backup' subdirectory exists (standard for Duplicacy Web Edition detailed run logs)
-        search_dir = LOG_DIR_DUPLICACY
-        backup_sub = os.path.join(LOG_DIR_DUPLICACY, "backup")
-        if os.path.exists(backup_sub) and os.path.isdir(backup_sub):
-            search_dir = backup_sub
-            
         log_files = []
-        for f in os.listdir(search_dir):
-            full_path = os.path.join(search_dir, f)
+        
+        # 1. Search root LOG_DIR_DUPLICACY (for pushed logs like duplicacy_*.log)
+        for f in os.listdir(LOG_DIR_DUPLICACY):
+            full_path = os.path.join(LOG_DIR_DUPLICACY, f)
             if os.path.isfile(full_path) and f.endswith(".log"):
                 log_files.append((full_path, os.path.getmtime(full_path)))
                 
-        # Fall back to root directory if no files are found in backup subfolder
-        if not log_files and search_dir != LOG_DIR_DUPLICACY:
-            search_dir = LOG_DIR_DUPLICACY
-            for f in os.listdir(search_dir):
-                full_path = os.path.join(search_dir, f)
-                if os.path.isfile(full_path) and f.endswith(".log"):
-                    log_files.append((full_path, os.path.getmtime(full_path)))
-
+        # 2. Search 'backup', 'check', and 'prune' subdirectories (Duplicacy Web Edition layout)
+        subdirs = ["backup", "check", "prune"]
+        for sub in subdirs:
+            subpath = os.path.join(LOG_DIR_DUPLICACY, sub)
+            if os.path.exists(subpath) and os.path.isdir(subpath):
+                for f in os.listdir(subpath):
+                    full_path = os.path.join(subpath, f)
+                    if os.path.isfile(full_path) and f.endswith(".log"):
+                        log_files.append((full_path, os.path.getmtime(full_path)))
+                        
         if not log_files:
             return "No Duplicacy log files found."
             
-        # Sort by modification time descending
+        # Sort by modification time descending (latest logs first)
         log_files.sort(key=lambda x: x[1], reverse=True)
         
-        # Read the latest 3 log files to capture multiple parallel/sequential backup jobs
+        # Read the latest 5 log files to capture recent backups, checks, and prunes
         recent_logs_content = []
-        for i in range(min(3, len(log_files))):
+        for i in range(min(5, len(log_files))):
             file_path = log_files[i][0]
             logger.info("Reading Duplicacy log: %s", file_path)
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-                # Truncate each content to 15k chars to fit context nicely
-                if len(content) > 15000:
-                    content = "[TRUNCATED...]\n" + content[-15000:]
-                recent_logs_content.append(f"--- File: {os.path.basename(file_path)} ---\n{content}")
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+                    if len(content) > 15000:
+                        content = "[TRUNCATED...]\n" + content[-15000:]
+                    # Get file context relative path to help the AI understand its context
+                    parent_dir = os.path.basename(os.path.dirname(file_path))
+                    label = f"{parent_dir}/{os.path.basename(file_path)}" if parent_dir in subdirs else os.path.basename(file_path)
+                    recent_logs_content.append(f"--- File: {label} ---\n{content}")
+            except Exception as e:
+                logger.error("Error reading Duplicacy log %s: %s", file_path, e)
                 
         return "\n\n".join(recent_logs_content)
     except Exception as e:
@@ -398,34 +408,46 @@ def get_duplicacy_recent_logs() -> str:
 
 def get_rsync_recent_logs() -> str:
     # Rsync logs can be a file or multiple files in a directory
-    rsync_file = None
     if os.path.isfile(LOG_DIR_RSYNC):
-        rsync_file = LOG_DIR_RSYNC
-    elif os.path.isdir(LOG_DIR_RSYNC):
-        # Look for rsync.log or latest log file
+        try:
+            with open(LOG_DIR_RSYNC, "r", encoding="utf-8", errors="ignore") as f:
+                return f"--- File: {os.path.basename(LOG_DIR_RSYNC)} ---\n" + "".join(f.readlines()[-300:])
+        except Exception as e:
+            return f"Error reading Rsync file: {str(e)}"
+            
+    if not os.path.exists(LOG_DIR_RSYNC) or not os.path.isdir(LOG_DIR_RSYNC):
+        logger.warning("Rsync log path not found or not a directory: %s", LOG_DIR_RSYNC)
+        return "Rsync log path not found."
+        
+    try:
         log_files = []
         for f in os.listdir(LOG_DIR_RSYNC):
             full_path = os.path.join(LOG_DIR_RSYNC, f)
             if os.path.isfile(full_path) and (f.endswith(".log") or f == "rsync"):
                 log_files.append((full_path, os.path.getmtime(full_path)))
-        if log_files:
-            log_files.sort(key=lambda x: x[1], reverse=True)
-            rsync_file = log_files[0][0]
+                
+        if not log_files:
+            return "No Rsync log files found."
             
-    if not rsync_file or not os.path.exists(rsync_file):
-        logger.warning("Rsync log file not found. Checked path: %s", LOG_DIR_RSYNC)
-        return "Rsync log file not found."
+        # Sort by modification time descending (latest runs first)
+        log_files.sort(key=lambda x: x[1], reverse=True)
         
-    try:
-        logger.info("Reading Rsync log: %s", rsync_file)
-        with open(rsync_file, "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.readlines()
-            # Grab the last 500 lines of the rsync run
-            recent_lines = lines[-500:]
-            return f"--- File: {os.path.basename(rsync_file)} ---\n" + "".join(recent_lines)
+        # Read the latest 5 log files to capture all different backup source logs (e.g. local_rsync, rsync_music)
+        recent_logs_content = []
+        for file_path, _ in log_files[:5]:
+            logger.info("Reading Rsync log: %s", file_path)
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    lines = f.readlines()
+                    recent_lines = lines[-300:] # Last 300 lines
+                    recent_logs_content.append(f"--- File: {os.path.basename(file_path)} ---\n" + "".join(recent_lines))
+            except Exception as e:
+                logger.error("Error reading Rsync log %s: %s", file_path, e)
+                
+        return "\n\n".join(recent_logs_content) if recent_logs_content else "No Rsync log contents read."
     except Exception as e:
-        logger.error("Error reading Rsync logs: %s", e)
-        return f"Error reading Rsync logs: {str(e)}"
+        logger.error("Error reading Rsync logs directory: %s", e)
+        return f"Error reading Rsync logs directory: {str(e)}"
 
 def send_discord_notification(status: str, summary: str):
     if not DISCORD_WEBHOOK_URL:
@@ -739,6 +761,10 @@ async def probe_docker_services():
                 except Exception:
                     pass
             
+            # Fetch ignore patterns list
+            ignore_patterns_str = s.get("ignore_patterns")
+            ignore_patterns = [p.strip().lower() for p in ignore_patterns_str.split(",") if p.strip()] if ignore_patterns_str else []
+            
             clean_log_lines = []
             error_lines = []
             last_error_idx = -1
@@ -777,6 +803,8 @@ async def probe_docker_services():
                     elif "debug" in lower_line or "trace" in lower_line or "verbose" in lower_line:
                         has_error = False
                     elif lower_line.startswith("d! ") or " d! " in lower_line:
+                        has_error = False
+                    elif ignore_patterns and any(pat in lower_line for pat in ignore_patterns):
                         has_error = False
                 
                 if has_error:
@@ -918,9 +946,18 @@ def receive_report(report: BackupReport):
     # Write pushed log content to file
     if report.log_content:
         try:
-            os.makedirs(LOG_DIR_RSYNC, exist_ok=True)
-            log_filename = f"{report.id}.log" if report.id == "local_rsync" else f"rsync_{report.id}.log"
-            log_filepath = os.path.join(LOG_DIR_RSYNC, log_filename)
+            # Check if this is a Duplicacy report based on the ID prefix or suffix
+            is_duplicacy = "duplicacy" in report.id.lower() or "offsite" in report.id.lower() or "samba" in report.id.lower() or "music" in report.id.lower() or "tvshow" in report.id.lower()
+            
+            if is_duplicacy:
+                os.makedirs(LOG_DIR_DUPLICACY, exist_ok=True)
+                log_filename = f"{report.id}.log" if report.id.startswith("duplicacy_") else f"duplicacy_{report.id}.log"
+                log_filepath = os.path.join(LOG_DIR_DUPLICACY, log_filename)
+            else:
+                os.makedirs(LOG_DIR_RSYNC, exist_ok=True)
+                log_filename = f"{report.id}.log" if report.id == "local_rsync" else f"rsync_{report.id}.log"
+                log_filepath = os.path.join(LOG_DIR_RSYNC, log_filename)
+                
             with open(log_filepath, "w", encoding="utf-8") as f:
                 f.write(report.log_content)
             logger.info("Saved pushed log content for %s to %s", report.id, log_filepath)
@@ -981,7 +1018,10 @@ def get_raw_logs(source: str):
         possible_paths = [
             os.path.join(LOG_DIR_RSYNC, f"{source}.log"),
             os.path.join(LOG_DIR_RSYNC, f"rsync_{source}.log"),
-            os.path.join(LOG_DIR_RSYNC, f"{source.replace('rsync_', '')}.log")
+            os.path.join(LOG_DIR_RSYNC, f"{source.replace('rsync_', '')}.log"),
+            os.path.join(LOG_DIR_DUPLICACY, f"{source}.log"),
+            os.path.join(LOG_DIR_DUPLICACY, f"duplicacy_{source}.log"),
+            os.path.join(LOG_DIR_DUPLICACY, f"{source.replace('duplicacy_', '')}.log")
         ]
         for path in possible_paths:
             if os.path.exists(path) and os.path.isfile(path):
@@ -1174,6 +1214,119 @@ def delete_docker_service(service_id: str):
         return {"message": f"Successfully removed service '{service_id}'."}
     except Exception as e:
         logger.error("Failed to delete Docker service: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+class IgnorePatternRequest(BaseModel):
+    pattern: str
+
+@app.post("/api/docker/service/{service_id}/analyze")
+def analyze_docker_service_logs(service_id: str):
+    if not GEMINI_API_KEY:
+        return {
+            "analysis": "### AI Analysis Disabled\n\nGemini API key is not configured. Please set the `GEMINI_API_KEY` environment variable to enable AI log analysis."
+        }
+        
+    try:
+        with get_db() as conn:
+            cursor = conn.execute("SELECT * FROM docker_services WHERE id = ?", (service_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Service not found.")
+            s = dict(row)
+            
+        c_name = s["container_name"]
+        logs = s["log_snippet"] or "No logs available."
+        status = s["status"]
+        api_health = s["api_health"]
+        message = s["message"]
+        
+        prompt = f"""
+You are the AI DevOps assistant for the Unraid Backup & Log Sentinel.
+Analyze the following status and log output for the Docker container: '{c_name}' (Service ID: '{service_id}').
+
+Current Container Status: {status}
+Port Health Connection: {api_health}
+Current Alert Message: {message}
+
+Last 20 lines of logs:
+```
+{logs}
+```
+
+Please provide a brief, helpful assessment of these logs in clean Markdown:
+1. Explain in simple, non-jargon terms what any warning or error messages mean (or clarify if they are harmless debug logs).
+2. Give 2-3 specific, actionable steps to fix the issue if it is a real problem.
+3. Suggest a keyword or short phrase from the log lines (e.g. 'parsing size' or 'NoneType') that the user could add to their ignore list to permanently suppress this alert if it is harmless noise.
+
+Keep the tone concise, reassuring, and DevOps-expert level. Avoid long intros or conversational filler.
+"""
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt
+        )
+        return {"analysis": response.text}
+    except Exception as e:
+        logger.error("Error analyzing Docker service logs: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/docker/service/{service_id}/ignore")
+def add_ignore_pattern(service_id: str, payload: IgnorePatternRequest):
+    try:
+        new_pattern = payload.pattern.strip().lower()
+        if not new_pattern:
+            raise HTTPException(status_code=400, detail="Pattern cannot be empty.")
+            
+        with get_db() as conn:
+            cursor = conn.execute("SELECT ignore_patterns FROM docker_services WHERE id = ?", (service_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Service not found.")
+                
+            current = row["ignore_patterns"]
+            if current:
+                patterns = [p.strip().lower() for p in current.split(",") if p.strip()]
+                if new_pattern not in patterns:
+                    patterns.append(new_pattern)
+                updated = ",".join(patterns)
+            else:
+                updated = new_pattern
+                
+            conn.execute("UPDATE docker_services SET ignore_patterns = ? WHERE id = ?", (updated, service_id))
+            conn.commit()
+            
+        logger.info("Added ignore pattern '%s' to service '%s'.", new_pattern, service_id)
+        return {"message": f"Successfully ignored pattern '{new_pattern}'."}
+    except Exception as e:
+        logger.error("Failed to add ignore pattern: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/docker/service/{service_id}/ignore")
+def delete_ignore_pattern(service_id: str, pattern: str):
+    try:
+        target_pattern = pattern.strip().lower()
+        with get_db() as conn:
+            cursor = conn.execute("SELECT ignore_patterns FROM docker_services WHERE id = ?", (service_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Service not found.")
+                
+            current = row["ignore_patterns"]
+            if not current:
+                return {"message": "No ignore patterns exist."}
+                
+            patterns = [p.strip().lower() for p in current.split(",") if p.strip()]
+            if target_pattern in patterns:
+                patterns.remove(target_pattern)
+                
+            updated = ",".join(patterns) if patterns else None
+            conn.execute("UPDATE docker_services SET ignore_patterns = ? WHERE id = ?", (updated, service_id))
+            conn.commit()
+            
+        logger.info("Removed ignore pattern '%s' from service '%s'.", target_pattern, service_id)
+        return {"message": f"Successfully stopped ignoring pattern '{target_pattern}'."}
+    except Exception as e:
+        logger.error("Failed to delete ignore pattern: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Start the background task scheduler upon startup
