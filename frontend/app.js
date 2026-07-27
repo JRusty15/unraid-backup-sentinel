@@ -595,8 +595,11 @@ async function loadDockerStatus() {
                     
                     <!-- AI Diagnostics Explanation Container -->
                     <div id="ai-analysis-container-${id}" style="display: ${aiDisplay}; background: hsla(262, 85%, 65%, 0.05); border: 1px solid hsla(262, 85%, 65%, 0.2); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem;">
-                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; color: hsl(262, 85%, 65%); font-weight: 600; font-size: 0.95rem;">
-                            <i class="fa-solid fa-brain"></i> AI Diagnostics Explanation
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem; color: hsl(262, 85%, 65%); font-weight: 600; font-size: 0.95rem;">
+                                <i class="fa-solid fa-brain"></i> AI Diagnostics Explanation
+                            </div>
+                            <span onclick="clearCachedAIAnalysis('${id}')" style="font-size: 0.7rem; color: var(--text-muted); cursor: pointer; text-decoration: underline;" title="Clear this analysis from cache">Clear</span>
                         </div>
                         <div id="ai-analysis-text-${id}" class="markdown-body" style="font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary); text-align: left;">${aiText}</div>
                     </div>
@@ -782,6 +785,15 @@ async function analyzeLogsWithAI(serviceId) {
             freshBtn.innerHTML = '<i class="fa-solid fa-brain"></i> Analyze Logs with AI';
         }
     }
+}
+
+// Clear the cached AI analysis report for a container
+function clearCachedAIAnalysis(serviceId) {
+    localStorage.removeItem(`ai_analysis_${serviceId}`);
+    const container = document.getElementById(`ai-analysis-container-${serviceId}`);
+    const textEl = document.getElementById(`ai-analysis-text-${serviceId}`);
+    if (container) container.style.display = 'none';
+    if (textEl) textEl.innerHTML = '';
 }
 
 // Toggle display of ignore patterns UI form
