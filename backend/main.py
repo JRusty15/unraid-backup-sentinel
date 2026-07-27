@@ -592,11 +592,13 @@ async def run_log_analysis():
         ## Recommendations
         Bullet points of exact fixes if any warnings or errors are found. Keep it action-oriented.
         
-        --- DISCORD NOTIFICATION SUMMARY ---
-        At the very end of your response, add a short summary enclosed in <discord_summary>...</discord_summary> tags.
-        This summary must be a single, short sentence describing the most critical finding (warnings or errors) if they exist. E.g. "Storage backup failed with exit code 1" or "Drive 2 reporting DMA write timeout errors in Syslog".
-        If the system is completely healthy, output: "All backups completed successfully and no issues detected."
-        Keep it under 150 characters.
+        --- STATUS AND NOTIFICATION TAGS ---
+        At the very end of your response, add the following two tags:
+        1. A report status enclosed in <report_status>...</report_status> tags. Choose exactly one value: "healthy", "warning", or "critical" (based on whether the system is fully healthy or has issues).
+        2. A short summary enclosed in <discord_summary>...</discord_summary> tags.
+           This summary must be a single, short sentence describing the most critical finding (warnings or errors) if they exist. E.g. "Storage backup failed with exit code 1" or "Drive 2 reporting DMA write timeout errors in Syslog".
+           If the system is completely healthy, output: "All backups completed successfully and no issues detected."
+           Keep the summary under 150 characters.
         """
         
         # Call Gemini model
@@ -615,6 +617,21 @@ async def run_log_analysis():
             discord_summary = match.group(1).strip()
             # Remove the tag from the report shown in the UI
             report_text = re.sub(r"<discord_summary>.*?</discord_summary>", "", report_text, flags=re.DOTALL).strip()
+            
+        # Extract report status if present
+        status = "healthy"
+        status_match = re.search(r"<report_status>(.*?)</report_status>", report_text, re.DOTALL)
+        if status_match:
+            status = status_match.group(1).strip().lower()
+            if status not in ["healthy", "warning", "critical"]:
+                status = "healthy"
+            report_text = re.sub(r"<report_status>.*?</report_status>", "", report_text, flags=re.DOTALL).strip()
+        else:
+            # Fallback to specific alert syntax matching
+            if "> [!CAUTION]" in report_text:
+                status = "critical"
+            elif "> [!WARNING]" in report_text:
+                status = "warning"
         
         # Token usage and cost tracking
         prompt_tokens = 0
@@ -624,13 +641,6 @@ async def run_log_analysis():
             completion_tokens = response.usage_metadata.candidates_token_count or 0
             
         cost = (prompt_tokens * PRICE_INPUT_TOKEN) + (completion_tokens * PRICE_OUTPUT_TOKEN)
-        
-        # Determine status of the report
-        status = "healthy"
-        if "![CAUTION]" in report_text or "caution" in report_text.lower() or "critical" in report_text.lower():
-            status = "critical"
-        elif "![WARNING]" in report_text or "warning" in report_text.lower():
-            status = "warning"
             
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
         
