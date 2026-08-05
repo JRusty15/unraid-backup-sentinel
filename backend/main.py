@@ -883,39 +883,42 @@ async def probe_docker_services():
             curr_level = "warning"
             
         if prev_level != curr_level and prev_status != "unknown":
-            ai_diagnosis = ""
-            if curr_level in ["warning", "critical"] and GEMINI_API_KEY:
-                try:
-                    logger.info("Generating transition alert AI diagnostics for '%s'...", name)
-                    prompt = f"""
-                    You are an expert DevOps assistant. Provide a brief, 1-2 sentence diagnostic explanation of the following Docker service issue to be sent in a Discord alert.
+            # Only alert on Discord if either the previous or current level was critical (stopped/failed)
+            # This filters out noisy warning-only transitions.
+            if curr_level == "critical" or prev_level == "critical":
+                ai_diagnosis = ""
+                if curr_level in ["warning", "critical"] and GEMINI_API_KEY:
+                    try:
+                        logger.info("Generating transition alert AI diagnostics for '%s'...", name)
+                        prompt = f"""
+                        You are an expert DevOps assistant. Provide a brief, 1-2 sentence diagnostic explanation of the following Docker service issue to be sent in a Discord alert.
+                        
+                        Service: {name} (Container Name: {c_name})
+                        Container Status: {container_status}
+                        Port Connectivity Health: {api_health}
+                        Check Message: {message}
+                        
+                        Recent container log lines:
+                        {log_snippet}
+                        
+                        Keep it short, clear, and direct. Focus on the root cause and suggestions to fix it. Do not include conversational filler.
+                        """
+                        client = genai.Client(api_key=GEMINI_API_KEY)
+                        response = client.models.generate_content(
+                            model=GEMINI_MODEL,
+                            contents=prompt
+                        )
+                        if response.text:
+                            ai_diagnosis = response.text.strip()
+                    except Exception as e:
+                        logger.error("Failed to generate transition AI diagnostics: %s", e)
+                        
+                emoji = "🟢" if curr_level == "healthy" else ("⚠️" if curr_level == "warning" else "🚨")
+                summary_msg = f"{emoji} **{name}** health changed from **{prev_level}** to **{curr_level}**.\n\n*   **Container Status:** `{container_status}`\n*   **API Health:** `{api_health}`\n*   **Details:** {message}"
+                if ai_diagnosis:
+                    summary_msg += f"\n\n**🤖 AI Diagnostics:**\n{ai_diagnosis}"
                     
-                    Service: {name} (Container Name: {c_name})
-                    Container Status: {container_status}
-                    Port Connectivity Health: {api_health}
-                    Check Message: {message}
-                    
-                    Recent container log lines:
-                    {log_snippet}
-                    
-                    Keep it short, clear, and direct. Focus on the root cause and suggestions to fix it. Do not include conversational filler.
-                    """
-                    client = genai.Client(api_key=GEMINI_API_KEY)
-                    response = client.models.generate_content(
-                        model=GEMINI_MODEL,
-                        contents=prompt
-                    )
-                    if response.text:
-                        ai_diagnosis = response.text.strip()
-                except Exception as e:
-                    logger.error("Failed to generate transition AI diagnostics: %s", e)
-                    
-            emoji = "🟢" if curr_level == "healthy" else ("⚠️" if curr_level == "warning" else "🚨")
-            summary_msg = f"{emoji} **{name}** health changed from **{prev_level}** to **{curr_level}**.\n\n*   **Container Status:** `{container_status}`\n*   **API Health:** `{api_health}`\n*   **Details:** {message}"
-            if ai_diagnosis:
-                summary_msg += f"\n\n**🤖 AI Diagnostics:**\n{ai_diagnosis}"
-                
-            send_discord_notification(curr_level, summary_msg)
+                send_discord_notification(curr_level, summary_msg)
             
     logger.info("Docker services probe completed.")
 
