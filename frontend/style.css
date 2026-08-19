@@ -188,6 +188,37 @@ body {
     box-shadow: 0 4px 20px hsla(262, 80%, 50%, 0.15);
 }
 
+.nav-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-left: auto;
+    background-color: var(--text-secondary);
+    opacity: 0.8;
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.nav-status-dot.healthy {
+    background-color: var(--color-success);
+    box-shadow: 0 0 8px var(--color-success);
+}
+
+.nav-status-dot.warning {
+    background-color: var(--color-warning);
+    box-shadow: 0 0 8px var(--color-warning);
+}
+
+.nav-status-dot.critical {
+    background-color: var(--color-failed);
+    box-shadow: 0 0 8px var(--color-failed);
+}
+
+.nav-status-dot.unknown {
+    background-color: var(--text-secondary);
+    box-shadow: none;
+}
+
+
 .server-status-card {
     background-color: hsla(220, 15%, 10%, 0.5);
     border: 1px solid var(--border-card);

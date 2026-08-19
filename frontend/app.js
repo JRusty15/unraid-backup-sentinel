@@ -251,19 +251,23 @@ async function loadBackupStatuses() {
         document.getElementById('group-duplicacy-wrapper').style.display = duplicacyCount > 0 ? 'block' : 'none';
         document.getElementById('group-other-wrapper').style.display = otherCount > 0 ? 'block' : 'none';
         
-        // Update overall system status indicator
+        // Update overall system status indicator and sidebar status dot
         const sysLabel = document.getElementById('system-overall-health');
         const sysPulse = document.querySelector('.status-pulse-dot');
+        const navDot = document.getElementById('nav-status-dashboard');
         
         if (systemHealth === 'healthy') {
             sysLabel.textContent = 'Active & Healthy';
             sysPulse.className = 'status-pulse-dot ok';
+            if (navDot) navDot.className = 'nav-status-dot healthy';
         } else if (systemHealth === 'warning') {
             sysLabel.textContent = 'Warnings Detected';
             sysPulse.className = 'status-pulse-dot warning';
+            if (navDot) navDot.className = 'nav-status-dot warning';
         } else {
             sysLabel.textContent = 'Attention Required';
             sysPulse.className = 'status-pulse-dot failed';
+            if (navDot) navDot.className = 'nav-status-dot critical';
         }
         
     } catch (err) {
@@ -520,6 +524,7 @@ async function loadDockerStatus() {
         }
         
         let latestTime = null;
+        let dockerPageHealth = 'healthy';
         
         // Sort Docker services alphabetically by name
         data.sort((a, b) => a.name.localeCompare(b.name));
@@ -550,12 +555,16 @@ async function loadDockerStatus() {
                 iconColor = 'var(--color-success)';
             } else if (status === 'stopped' || apiHealth === 'unhealthy' || status === 'not_found') {
                 statusClass = 'failed';
-                iconClass = 'fa-solid fa-triangle-exclamation';
                 iconColor = 'var(--color-failed)';
             } else if (apiHealth === 'unresponsive' || status === 'error' || apiHealth === 'warning') {
                 statusClass = 'warning';
-                iconClass = 'fa-solid fa-circle-exclamation';
                 iconColor = 'var(--color-warning)';
+            }
+            
+            if (statusClass === 'failed') {
+                dockerPageHealth = 'critical';
+            } else if (statusClass === 'warning' && dockerPageHealth !== 'critical') {
+                dockerPageHealth = 'warning';
             }
             
             const offset = (statusClass === 'unknown') ? '314' : '0';
@@ -662,6 +671,11 @@ async function loadDockerStatus() {
             } else {
                 timeLabel.textContent = 'Last checked: Never';
             }
+        }
+        
+        const navDot = document.getElementById('nav-status-docker');
+        if (navDot) {
+            navDot.className = `nav-status-dot ${dockerPageHealth}`;
         }
         
     } catch (err) {
@@ -918,6 +932,7 @@ async function loadSystemsStatus() {
         }
         
         let latestTime = null;
+        let systemsPageHealth = 'healthy';
         data.sort((a, b) => a.name.localeCompare(b.name));
         
         data.forEach(system => {
@@ -927,6 +942,12 @@ async function loadSystemsStatus() {
             const lastRun = system.last_run;
             const message = system.message || '';
             const logs = system.log_snippet || 'No logs available.';
+            
+            if (status === 'critical') {
+                systemsPageHealth = 'critical';
+            } else if (status === 'warning' && systemsPageHealth !== 'critical') {
+                systemsPageHealth = 'warning';
+            }
             
             if (lastRun) {
                 const checkTime = new Date(lastRun);
@@ -1121,6 +1142,11 @@ async function loadSystemsStatus() {
             }
         }
         
+        const navDot = document.getElementById('nav-status-systems');
+        if (navDot) {
+            navDot.className = `nav-status-dot ${systemsPageHealth}`;
+        }
+        
     } catch(err) {
         container.innerHTML = `<p class="meta-text" style="grid-column: 1 / -1; text-align: center; color: var(--color-failed); padding: 2rem;">Error loading remote systems: ${escapeHtml(err.message)}</p>`;
     }
@@ -1169,6 +1195,8 @@ async function triggerSystemSingleProbe(systemId) {
 // Initial Bootstrap load
 window.addEventListener('DOMContentLoaded', () => {
     refreshDashboardData();
+    loadDockerStatus();
+    loadSystemsStatus();
     
     // Auto-refresh active panel data every 10 seconds (skip if any active AI diagnostics is running)
     setInterval(() => {

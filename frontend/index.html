@@ -34,15 +34,18 @@
             <nav class="nav-menu">
                 <button class="nav-item active" id="btn-nav-dashboard" onclick="switchTab('dashboard')">
                     <i class="fa-solid fa-chart-pie"></i> Dashboard
+                    <span class="nav-status-dot" id="nav-status-dashboard"></span>
                 </button>
                 <button class="nav-item" id="btn-nav-ai" onclick="switchTab('ai')">
                     <i class="fa-solid fa-brain"></i> AI Diagnostics
                 </button>
                 <button class="nav-item" id="btn-nav-docker" onclick="switchTab('docker')">
                     <i class="fa-solid fa-cubes"></i> Docker Services
+                    <span class="nav-status-dot" id="nav-status-docker"></span>
                 </button>
                 <button class="nav-item" id="btn-nav-systems" onclick="switchTab('systems')">
                     <i class="fa-solid fa-network-wired"></i> Remote Systems
+                    <span class="nav-status-dot" id="nav-status-systems"></span>
                 </button>
                 <button class="nav-item" id="btn-nav-syslog" onclick="switchTab('syslog')">
                     <i class="fa-solid fa-server"></i> Logs & Syslog
