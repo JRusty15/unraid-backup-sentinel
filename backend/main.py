@@ -57,6 +57,9 @@ class BackupReport(BaseModel):
     message: Optional[str] = ""
     heartbeat_hours: Optional[int] = None
     log_content: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    duration: Optional[str] = None
+
 
 # Database helper functions
 def get_db():
@@ -72,7 +75,10 @@ def init_db():
                 status TEXT NOT NULL,
                 last_run TEXT NOT NULL,
                 message TEXT,
-                heartbeat_hours INTEGER
+                heartbeat_hours INTEGER,
+                duration_seconds INTEGER,
+                duration TEXT,
+                last_success TEXT
             )
         """)
         
@@ -81,6 +87,25 @@ def init_db():
             conn.execute("ALTER TABLE backups ADD COLUMN heartbeat_hours INTEGER")
         except sqlite3.OperationalError:
             pass # Column already exists
+            
+        # Migration for existing databases: add duration_seconds column
+        try:
+            conn.execute("ALTER TABLE backups ADD COLUMN duration_seconds INTEGER")
+        except sqlite3.OperationalError:
+            pass # Column already exists
+
+        # Migration for existing databases: add duration column
+        try:
+            conn.execute("ALTER TABLE backups ADD COLUMN duration TEXT")
+        except sqlite3.OperationalError:
+            pass # Column already exists
+
+        # Migration for existing databases: add last_success column
+        try:
+            conn.execute("ALTER TABLE backups ADD COLUMN last_success TEXT")
+        except sqlite3.OperationalError:
+            pass # Column already exists
+
             
         conn.execute("""
             CREATE TABLE IF NOT EXISTS analysis_history (
@@ -973,18 +998,39 @@ def receive_report(report: BackupReport):
     timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
     
     with get_db() as conn:
-        # Fetch existing record to check heartbeat_hours
-        cursor = conn.execute("SELECT heartbeat_hours FROM backups WHERE id = ?", (report.id,))
+        # Fetch existing record to check heartbeat_hours and last_success
+        cursor = conn.execute("SELECT heartbeat_hours, last_success FROM backups WHERE id = ?", (report.id,))
         row = cursor.fetchone()
         existing_heartbeat = row["heartbeat_hours"] if row else None
+        existing_last_success = row["last_success"] if row else None
         
         heartbeat_to_save = report.heartbeat_hours if report.heartbeat_hours is not None else existing_heartbeat
         
+        # Determine last_success value
+        if report.status == "success":
+            last_success_to_save = timestamp
+        else:
+            last_success_to_save = existing_last_success
+
         conn.execute(
-            "INSERT OR REPLACE INTO backups (id, status, last_run, message, heartbeat_hours) VALUES (?, ?, ?, ?, ?)",
-            (report.id, report.status, timestamp, report.message, heartbeat_to_save)
+            """
+            INSERT OR REPLACE INTO backups (
+                id, status, last_run, message, heartbeat_hours, duration_seconds, duration, last_success
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                report.id,
+                report.status,
+                timestamp,
+                report.message,
+                heartbeat_to_save,
+                report.duration_seconds,
+                report.duration,
+                last_success_to_save
+            )
         )
         conn.commit()
+
         
     # Write pushed log content to file
     if report.log_content:

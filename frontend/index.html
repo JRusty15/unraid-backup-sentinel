@@ -252,7 +252,7 @@
                             <h4 style="margin-bottom: 0.5rem; font-family: var(--font-heading);">Webhook Endpoint URL</h4>
                             <p class="meta-text" style="margin-bottom: 1rem;">Send POST requests to this URL from your backup scripts to report backup status.</p>
                             <div class="log-terminal" style="font-family: var(--font-mono); font-size: 0.9rem; padding: 1rem; color: hsl(200, 80%, 75%); overflow-x: auto; white-space: nowrap; height: auto;">
-                                curl -X POST -H "Content-Type: application/json" -d '{"id": "backup_id", "status": "success", "message": "Done"}' http://<span id="settings-host-ip">YOUR_SERVER_IP</span>:<span id="settings-host-port">PORT</span>/api/report
+                                curl -X POST -H "Content-Type: application/json" -d '{"id": "backup_id", "status": "success", "message": "Done", "duration_seconds": 323, "duration": "5m 23s"}' http://<span id="settings-host-ip">YOUR_SERVER_IP</span>:<span id="settings-host-port">PORT</span>/api/report
                             </div>
                         </div>
                     </div>

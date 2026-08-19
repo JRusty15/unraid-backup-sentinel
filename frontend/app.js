@@ -158,6 +158,9 @@ async function loadBackupStatuses() {
             const lastRun = backup.last_run;
             const message = backup.message || 'No message provided.';
             
+            const duration = backup.duration;
+            const lastSuccess = backup.last_success;
+            
             // Choose icons and colors
             let iconClass = 'fa-solid fa-server';
             let iconColor = 'var(--text-secondary)';
@@ -210,10 +213,19 @@ async function loadBackupStatuses() {
                     <div class="status-details">
                         <p class="timestamp-label">Last Run</p>
                         <p class="timestamp-value" id="${id}-last-run">${formatDate(lastRun)}</p>
-                        <p class="message-value" id="${id}-message" title="${escapeHtml(message)}">${escapeHtml(message)}</p>
+                        ${duration ? `
+                            <p class="timestamp-label" style="margin-top: 0.25rem;">Run Duration</p>
+                            <p class="timestamp-value" id="${id}-duration">${escapeHtml(duration)}</p>
+                        ` : ''}
+                        ${lastSuccess ? `
+                            <p class="timestamp-label" style="margin-top: 0.25rem;">Last Success</p>
+                            <p class="timestamp-value" id="${id}-last-success">${formatDate(lastSuccess)}</p>
+                        ` : ''}
+                        <p class="message-value" id="${id}-message" title="${escapeHtml(message)}" style="margin-top: 0.25rem;">${escapeHtml(message)}</p>
                     </div>
                 </div>
             `;
+
             
             if (id.toLowerCase().includes('rsync')) {
                 if (rsyncContainer) rsyncContainer.appendChild(card);

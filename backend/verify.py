@@ -14,7 +14,11 @@ def populate_mock_data():
             id TEXT PRIMARY KEY,
             status TEXT NOT NULL,
             last_run TEXT NOT NULL,
-            message TEXT
+            message TEXT,
+            heartbeat_hours INTEGER,
+            duration_seconds INTEGER,
+            duration TEXT,
+            last_success TEXT
         )
     """)
     conn.execute("""
@@ -45,13 +49,36 @@ def populate_mock_data():
     conn.execute("DELETE FROM api_usage")
 
     # Insert mock backup data
-    conn.execute("INSERT OR REPLACE INTO backups (id, status, last_run, message) VALUES (?, ?, ?, ?)",
-                 ("local_rsync", "warning", (datetime.datetime.now() - datetime.timedelta(hours=2)).isoformat(), 
-                  "Rsync completed but warnings were reported (partial transfer code 23)."))
+    conn.execute("""
+        INSERT OR REPLACE INTO backups (
+            id, status, last_run, message, heartbeat_hours, duration_seconds, duration, last_success
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        "local_rsync", 
+        "warning", 
+        (datetime.datetime.now() - datetime.timedelta(hours=2)).isoformat(), 
+        "Rsync completed but warnings were reported (partial transfer code 23).",
+        26,
+        75,
+        "1m 15s",
+        (datetime.datetime.now() - datetime.timedelta(hours=26)).isoformat()
+    ))
     
-    conn.execute("INSERT OR REPLACE INTO backups (id, status, last_run, message) VALUES (?, ?, ?, ?)",
-                 ("offsite_duplicacy", "success", (datetime.datetime.now() - datetime.timedelta(hours=4)).isoformat(), 
-                  "Backup successfully completed. Revision 42, transferred 45.2 GB."))
+    conn.execute("""
+        INSERT OR REPLACE INTO backups (
+            id, status, last_run, message, heartbeat_hours, duration_seconds, duration, last_success
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        "offsite_duplicacy", 
+        "success", 
+        (datetime.datetime.now() - datetime.timedelta(hours=4)).isoformat(), 
+        "Backup successfully completed. Revision 42, transferred 45.2 GB.",
+        240,
+        334,
+        "5m 34s",
+        (datetime.datetime.now() - datetime.timedelta(hours=4)).isoformat()
+    ))
+
     
     # Insert mock API usage logs
     conn.execute("INSERT INTO api_usage (timestamp, action, prompt_tokens, completion_tokens, cost) VALUES (?, ?, ?, ?, ?)",
