@@ -520,26 +520,45 @@ def get_rsync_recent_logs() -> str:
         logger.error("Error reading Rsync logs directory: %s", e)
         return f"Error reading Rsync logs directory: {str(e)}"
 
-def post_to_discord(payload: dict):
+DISCORD_LOCK = asyncio.Lock()
+LAST_DISCORD_POST_TIME = 0.0
+
+async def post_to_discord(payload: dict):
+    global LAST_DISCORD_POST_TIME
     if not DISCORD_WEBHOOK_URL:
         return
-    try:
-        import urllib.request
-        import json
-        req = urllib.request.Request(
-            DISCORD_WEBHOOK_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "User-Agent": "unraid-sentinel"
-            }
-        )
-        urllib.request.urlopen(req)
-        logger.info("Sent Discord webhook notification successfully.")
-    except Exception as e:
-        logger.error("Failed to send Discord webhook: %s", e)
+        
+    async with DISCORD_LOCK:
+        import time
+        now = time.time()
+        elapsed = now - LAST_DISCORD_POST_TIME
+        min_interval = 2.0 # Minimum 2 seconds between posts to prevent rate-limiting
+        if elapsed < min_interval:
+            sleep_time = min_interval - elapsed
+            logger.info("Staggering Discord notification: sleeping for %.2f seconds...", sleep_time)
+            await asyncio.sleep(sleep_time)
+            
+        try:
+            import urllib.request
+            import json
+            req = urllib.request.Request(
+                DISCORD_WEBHOOK_URL,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "unraid-sentinel"
+                }
+            )
+            # Run blocking urlopen in executor to keep event loop free
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: urllib.request.urlopen(req))
+            logger.info("Sent Discord webhook notification successfully.")
+        except Exception as e:
+            logger.error("Failed to send Discord webhook: %s", e)
+        finally:
+            LAST_DISCORD_POST_TIME = time.time()
 
-def send_discord_notification(status: str, summary: str):
+async def send_discord_notification(status: str, summary: str):
     if not DISCORD_WEBHOOK_URL:
         return
         
@@ -581,7 +600,8 @@ def send_discord_notification(status: str, summary: str):
             }
         ]
     }
-    post_to_discord(payload)
+    await post_to_discord(payload)
+
 
 
 # Core AI Analysis Runner
@@ -733,7 +753,7 @@ async def run_log_analysis():
             conn.commit()
             
         # Trigger Discord webhook notification if there are issues
-        send_discord_notification(status, discord_summary)
+        await send_discord_notification(status, discord_summary)
         
         logger.info("Log analysis completed successfully. Tokens: In=%d, Out=%d. Cost: $%f", prompt_tokens, completion_tokens, cost)
         
@@ -781,7 +801,7 @@ def query_ha_error_log() -> str:
         else:
             raise Exception(f"HA error log API error: {response.status}")
 
-def send_ha_update_notification(updates: List[Dict]):
+async def send_ha_update_notification(updates: List[Dict]):
     fields = []
     for u in updates:
         fields.append({
@@ -799,9 +819,9 @@ def send_ha_update_notification(updates: List[Dict]):
             }
         ]
     }
-    post_to_discord(payload)
+    await post_to_discord(payload)
 
-def send_ha_error_notification(new_errors: List[str]):
+async def send_ha_error_notification(new_errors: List[str]):
     error_text = "\n".join(new_errors[:5])
     if len(new_errors) > 5:
         error_text += f"\n... and {len(new_errors) - 5} more errors."
@@ -815,7 +835,8 @@ def send_ha_error_notification(new_errors: List[str]):
             }
         ]
     }
-    post_to_discord(payload)
+    await post_to_discord(payload)
+
 
 async def probe_home_assistant():
     logger.info("Probing Home Assistant...")
@@ -977,12 +998,12 @@ async def probe_home_assistant():
             # Check for new updates
             old_update_avail = old_metadata.get("update_available", False)
             if update_available and not old_update_avail:
-                send_ha_update_notification(updates)
+                await send_ha_update_notification(updates)
                 
             # Check for new errors
             new_errors = [e for e in errors if e not in old_log_snippet]
             if new_errors:
-                send_ha_error_notification(new_errors)
+                await send_ha_error_notification(new_errors)
                 
             # Write to database
             conn.execute(
@@ -1271,7 +1292,7 @@ async def probe_docker_services():
                 if ai_diagnosis:
                     summary_msg += f"\n\n**🤖 AI Diagnostics:**\n{ai_diagnosis}"
                     
-                send_discord_notification(curr_level, summary_msg)
+                await send_discord_notification(curr_level, summary_msg)
             
     logger.info("Docker services probe completed.")
 
