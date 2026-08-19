@@ -167,7 +167,8 @@ def init_db():
                 metrics TEXT,
                 metadata TEXT,
                 message TEXT,
-                log_snippet TEXT
+                log_snippet TEXT,
+                ignore_patterns TEXT
             )
         """)
         
@@ -180,6 +181,12 @@ def init_db():
         # Migration for existing databases: add ignore_patterns column
         try:
             conn.execute("ALTER TABLE docker_services ADD COLUMN ignore_patterns TEXT")
+        except sqlite3.OperationalError:
+            pass # Column already exists
+
+        # Migration for existing databases: add ignore_patterns column to system_monitors
+        try:
+            conn.execute("ALTER TABLE system_monitors ADD COLUMN ignore_patterns TEXT")
         except sqlite3.OperationalError:
             pass # Column already exists
         
@@ -991,6 +998,17 @@ async def probe_home_assistant():
             logger.error("Failed to query HA WebSocket: %s", le)
             log_fetch_error = f"Error fetching HA logs: {str(le)}"
             
+        # Query ignore patterns for Home Assistant
+        ignore_patterns = []
+        try:
+            with get_db() as conn:
+                cursor = conn.execute("SELECT ignore_patterns FROM system_monitors WHERE id = ?", ("home_assistant",))
+                row = cursor.fetchone()
+                if row and row["ignore_patterns"]:
+                    ignore_patterns = [p.strip().lower() for p in row["ignore_patterns"].split(",") if p.strip()]
+        except Exception as pe:
+            logger.error("Failed to fetch HA ignore patterns: %s", pe)
+
         # Parse logs only if they were successfully fetched
         errors = []
         warnings = []
@@ -1011,6 +1029,12 @@ async def probe_home_assistant():
                 source = entry.get("name", "unknown")
                 
                 log_line = f"{level} ({source}) {msg}"
+                lower_line = log_line.lower()
+                
+                # Filter out ignored patterns
+                if ignore_patterns and any(pat in lower_line for pat in ignore_patterns):
+                    continue
+                    
                 if level in ["ERROR", "CRITICAL"]:
                     errors.append(log_line)
                 elif level == "WARNING":
@@ -1892,6 +1916,145 @@ def delete_ignore_pattern(service_id: str, pattern: str):
     except Exception as e:
         logger.error("Failed to delete ignore pattern: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/systems/{system_id}/clear_status")
+def clear_system_status(system_id: str):
+    try:
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with get_db() as conn:
+            cursor = conn.execute("SELECT 1 FROM system_monitors WHERE id = ?", (system_id,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="System not found.")
+                
+            conn.execute(
+                """
+                UPDATE system_monitors
+                SET status = ?, message = ?, log_snippet = ?, last_run = ?
+                WHERE id = ?
+                """,
+                (
+                    "healthy",
+                    "Status cleared manually.",
+                    "No warnings or errors reported.",
+                    timestamp,
+                    system_id
+                )
+            )
+            conn.commit()
+        logger.info("Manually cleared status for system '%s'.", system_id)
+        return {"message": "System status cleared successfully."}
+    except Exception as e:
+        logger.error("Failed to clear system status: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/systems/{system_id}/analyze")
+def analyze_system_logs(system_id: str):
+    if not GEMINI_API_KEY:
+        return {
+            "analysis": "### AI Analysis Disabled\n\nGemini API key is not configured. Please set the `GEMINI_API_KEY` environment variable to enable AI log analysis."
+        }
+        
+    try:
+        with get_db() as conn:
+            cursor = conn.execute("SELECT * FROM system_monitors WHERE id = ?", (system_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="System not found.")
+            s = dict(row)
+            
+        name = s["name"]
+        logs = s["log_snippet"] or "No logs available."
+        status = s["status"]
+        message = s["message"]
+        
+        prompt = f"""
+You are the AI DevOps assistant for the Unraid Backup & Log Sentinel.
+Analyze the following status and log output for the Remote System: '{name}' (System ID: '{system_id}').
+
+Current System Status: {status}
+Current Alert Message: {message}
+
+Last lines of logs or fetch errors:
+```
+{logs}
+```
+
+Please provide a brief, helpful assessment of these logs/errors in clean Markdown:
+1. Explain in simple, non-jargon terms what any warning, error, or connection issues mean.
+2. Give 2-3 specific, actionable steps to troubleshoot or resolve the issue.
+3. Suggest a keyword or short phrase from the log lines that the user could add to their ignore list to permanently suppress this alert if it is harmless noise.
+
+Keep the tone concise, reassuring, and DevOps-expert level. Avoid long intros or conversational filler.
+"""
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt
+        )
+        return {"analysis": response.text}
+    except Exception as e:
+        logger.error("Error analyzing remote system logs: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/systems/{system_id}/ignore")
+def add_system_ignore_pattern(system_id: str, payload: IgnorePatternRequest):
+    try:
+        new_pattern = payload.pattern.strip().lower()
+        if not new_pattern:
+            raise HTTPException(status_code=400, detail="Pattern cannot be empty.")
+            
+        with get_db() as conn:
+            cursor = conn.execute("SELECT ignore_patterns FROM system_monitors WHERE id = ?", (system_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="System not found.")
+                
+            current = row["ignore_patterns"]
+            if current:
+                patterns = [p.strip().lower() for p in current.split(",") if p.strip()]
+                if new_pattern not in patterns:
+                    patterns.append(new_pattern)
+                updated = ",".join(patterns)
+            else:
+                updated = new_pattern
+                
+            conn.execute("UPDATE system_monitors SET ignore_patterns = ? WHERE id = ?", (updated, system_id))
+            conn.commit()
+            
+        logger.info("Added ignore pattern '%s' to system '%s'.", new_pattern, system_id)
+        return {"message": f"Successfully ignored pattern '{new_pattern}'."}
+    except Exception as e:
+        logger.error("Failed to add ignore pattern: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/systems/{system_id}/ignore")
+def delete_system_ignore_pattern(system_id: str, pattern: str):
+    try:
+        target_pattern = pattern.strip().lower()
+        with get_db() as conn:
+            cursor = conn.execute("SELECT ignore_patterns FROM system_monitors WHERE id = ?", (system_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="System not found.")
+                
+            current = row["ignore_patterns"]
+            if not current:
+                return {"message": "No ignore patterns exist."}
+                
+            patterns = [p.strip().lower() for p in current.split(",") if p.strip()]
+            if target_pattern in patterns:
+                patterns.remove(target_pattern)
+                updated = ",".join(patterns) if patterns else None
+                conn.execute("UPDATE system_monitors SET ignore_patterns = ? WHERE id = ?", (updated, system_id))
+                conn.commit()
+                logger.info("Deleted ignore pattern '%s' from system '%s'.", target_pattern, system_id)
+                return {"message": f"Successfully removed ignore pattern '{target_pattern}'."}
+            else:
+                return {"message": "Ignore pattern not found."}
+    except Exception as e:
+        logger.error("Failed to delete ignore pattern: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # Start the background task scheduler upon startup
 @app.on_event("startup")

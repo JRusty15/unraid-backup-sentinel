@@ -954,6 +954,15 @@ async function loadSystemsStatus() {
                 if (!latestTime || checkTime > latestTime) latestTime = checkTime;
             }
             
+            // Parse ignore patterns list
+            const ignorePatternsStr = system.ignore_patterns || '';
+            const ignorePatterns = ignorePatternsStr.split(',').filter(p => p.trim().length > 0);
+            
+            // Retrieve cached AI analysis if exists
+            const cachedAnalysis = aiAnalysisCache.get(`system-${id}`);
+            const aiDisplay = cachedAnalysis ? 'block' : 'none';
+            const aiText = cachedAnalysis ? parseSimpleMarkdown(cachedAnalysis) : '';
+            
             let metrics = {};
             try {
                 metrics = typeof system.metrics === 'string' ? JSON.parse(system.metrics) : system.metrics || {};
@@ -1120,10 +1129,53 @@ async function loadSystemsStatus() {
                     ${updatesHtml}
                     ${repairsHtml}
                     
-                    <div class="timestamp-label" style="margin-top:0.5rem; font-size:0.75rem;">Error / Warning Logs</div>
-                    <div class="docker-log-panel" id="system-log-panel-${id}" style="font-family: monospace; font-size:0.75rem; white-space:pre-wrap; word-break:break-all; max-height:160px; height:160px;">${escapeHtml(logs)}</div>
+                    <!-- AI Analysis Panel -->
+                    <div id="system-ai-analysis-panel-${id}" class="docker-ai-panel" style="display: ${aiDisplay}; margin-top: 0.75rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; border-bottom: 1px solid var(--border-card); padding-bottom: 0.25rem;">
+                            <span style="font-size: 0.75rem; font-weight: 700; color: hsl(262, 85%, 75%); display: flex; align-items: center; gap: 0.35rem;">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i> AI Sentinel Log Audit
+                            </span>
+                            <span onclick="clearCachedSystemAIAnalysis('${id}')" style="font-size: 0.7rem; color: var(--text-muted); cursor: pointer; text-decoration: underline;" title="Clear this analysis from cache">Clear</span>
+                        </div>
+                        <div id="system-ai-analysis-text-${id}" class="markdown-body" style="font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary); text-align: left;">${aiText}</div>
+                    </div>
                     
-                    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.75rem;">
+                    <!-- Diagnostics & Mute Actions Row -->
+                    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem; width: 100%;">
+                        <button class="btn btn-secondary" onclick="analyzeSystemLogsWithAI('${id}')" id="btn-system-ai-analyze-${id}" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; background-color: hsla(262, 85%, 65%, 0.1); border-color: hsla(262, 85%, 65%, 0.3); color: hsl(262, 85%, 65%); flex-grow: 1;">
+                            <i class="fa-solid fa-brain"></i> Analyze Logs with AI
+                        </button>
+                        <button class="btn btn-secondary" onclick="toggleSystemIgnorePatternUI('${id}')" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; flex-grow: 1;">
+                            <i class="fa-solid fa-filter-circle-xmark"></i> Mute Log Alert
+                        </button>
+                        <button class="btn btn-secondary" onclick="clearSystemStatus('${id}')" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; flex-grow: 1; border-color: var(--border-card);">
+                            <i class="fa-solid fa-circle-check"></i> Clear Status
+                        </button>
+                    </div>
+                    
+                    <!-- Ignore Pattern Form -->
+                    <div id="system-ignore-pattern-ui-${id}" style="display: none; flex-direction: column; gap: 0.5rem; border: 1px dashed var(--border-card); padding: 0.75rem; border-radius: 6px; background-color: hsla(220, 15%, 15%, 0.2); margin-top: 0.5rem; width: 100%;">
+                        <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-primary); text-align: left;">Mute alerts for matching strings (case-insensitive):</div>
+                        <div style="display: flex; gap: 0.5rem; width: 100%;">
+                            <input type="text" id="system-input-ignore-${id}" placeholder="e.g. hue bridge connection lost" style="flex-grow: 1; font-size: 0.75rem; padding: 0.4rem; background: var(--bg-body); border: 1px solid var(--border-card); border-radius: 4px; color: var(--text-primary);">
+                            <button class="btn btn-secondary" onclick="addSystemIgnorePattern('${id}')" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; background: var(--color-success); border: none; color: white;">Add</button>
+                        </div>
+                        <div id="system-ignore-patterns-list-${id}" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.25rem; text-align: left; width: 100%;">
+                            ${ignorePatterns.length === 0 ? '<span style="font-size: 0.7rem; color: var(--text-muted);">No muted patterns yet.</span>' : 
+                                ignorePatterns.map(p => `
+                                    <span class="docker-badge" style="background-color: hsla(0, 0%, 20%, 0.6); color: var(--text-secondary); display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.7rem; border: 1px solid var(--border-card); padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: none;">
+                                        "${escapeHtml(p)}"
+                                        <i class="fa-solid fa-xmark" onclick="removeSystemIgnorePattern('${id}', '${p}')" style="cursor: pointer; color: var(--color-failed); font-size: 0.75rem;"></i>
+                                    </span>
+                                `).join('')
+                            }
+                        </div>
+                    </div>
+                    
+                    <div class="timestamp-label" style="margin-top:0.75rem; font-size:0.75rem; width: 100%;">Error / Warning Logs</div>
+                    <div class="docker-log-panel" id="system-log-panel-${id}" style="font-family: monospace; font-size:0.75rem; white-space:pre-wrap; word-break:break-all; max-height:160px; height:160px; width: 100%;">${escapeHtml(logs)}</div>
+                    
+                    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.75rem; width: 100%;">
                         <button class="btn btn-secondary" onclick="triggerSystemSingleProbe('${id}')" id="btn-system-probe-${id}" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; flex-grow: 1;">
                             <i class="fa-solid fa-arrows-rotate"></i> Check Health Now
                         </button>
@@ -1191,6 +1243,99 @@ async function triggerSystemSingleProbe(systemId) {
         btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Check Health Now';
     }
 }
+
+// Clear Remote System Status
+async function clearSystemStatus(systemId) {
+    if (!confirm(`Are you sure you want to clear the status for ${systemId}?`)) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/systems/${systemId}/clear_status`, { method: 'POST' });
+        if (!res.ok) throw new Error('Failed to clear system status');
+        await loadSystemsStatus();
+    } catch(err) {
+        alert("Failed to clear status: " + err.message);
+    }
+}
+
+// Toggle System Ignore Pattern UI
+function toggleSystemIgnorePatternUI(systemId) {
+    const el = document.getElementById(`system-ignore-pattern-ui-${systemId}`);
+    if (el) {
+        el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+    }
+}
+
+// Add System Ignore Pattern
+async function addSystemIgnorePattern(systemId) {
+    const input = document.getElementById(`system-input-ignore-${systemId}`);
+    if (!input) return;
+    
+    const pattern = input.value.trim();
+    if (!pattern) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/systems/${systemId}/ignore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pattern })
+        });
+        if (!res.ok) throw new Error('Failed to add ignore pattern');
+        input.value = '';
+        await loadSystemsStatus();
+    } catch(err) {
+        alert("Error adding ignore pattern: " + err.message);
+    }
+}
+
+// Remove System Ignore Pattern
+async function removeSystemIgnorePattern(systemId, pattern) {
+    try {
+        const res = await fetch(`${API_BASE}/api/systems/${systemId}/ignore?pattern=${encodeURIComponent(pattern)}`, {
+            method: 'DELETE'
+        });
+        if (!res.ok) throw new Error('Failed to delete ignore pattern');
+        await loadSystemsStatus();
+    } catch(err) {
+        alert("Error removing ignore pattern: " + err.message);
+    }
+}
+
+// Analyze System Logs with AI
+async function analyzeSystemLogsWithAI(systemId) {
+    const btn = document.getElementById(`btn-system-ai-analyze-${systemId}`);
+    const panel = document.getElementById(`system-ai-analysis-panel-${systemId}`);
+    const textEl = document.getElementById(`system-ai-analysis-text-${systemId}`);
+    
+    if (!btn || !panel || !textEl) return;
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Analyzing Logs...';
+    panel.style.display = 'block';
+    textEl.innerHTML = '<p class="meta-text"><i class="fa-solid fa-wand-magic-sparkles fa-pulse"></i> Gemini is auditing system status and logs...</p>';
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/systems/${systemId}/analyze`, { method: 'POST' });
+        if (!res.ok) throw new Error('Failed to run AI log analysis');
+        const data = await res.json();
+        
+        // Cache analysis so it survives auto-polls
+        aiAnalysisCache.set(`system-${systemId}`, data.analysis);
+        textEl.innerHTML = parseSimpleMarkdown(data.analysis);
+    } catch(err) {
+        textEl.innerHTML = `<p style="color: var(--color-failed); font-weight: 500;">Failed to analyze logs: ${escapeHtml(err.message)}</p>`;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-brain"></i> Analyze Logs with AI';
+    }
+}
+
+// Clear Cached System AI Analysis
+function clearCachedSystemAIAnalysis(systemId) {
+    aiAnalysisCache.delete(`system-${systemId}`);
+    const panel = document.getElementById(`system-ai-analysis-panel-${systemId}`);
+    if (panel) panel.style.display = 'none';
+}
+
 
 // Initial Bootstrap load
 window.addEventListener('DOMContentLoaded', () => {

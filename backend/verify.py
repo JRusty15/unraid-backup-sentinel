@@ -52,7 +52,8 @@ def populate_mock_data():
             metrics TEXT,
             metadata TEXT,
             message TEXT,
-            log_snippet TEXT
+            log_snippet TEXT,
+            ignore_patterns TEXT
         )
     """)
 
