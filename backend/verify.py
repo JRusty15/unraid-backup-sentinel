@@ -42,11 +42,25 @@ def populate_mock_data():
             cost REAL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS system_monitors (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            last_run TEXT,
+            metrics TEXT,
+            metadata TEXT,
+            message TEXT,
+            log_snippet TEXT
+        )
+    """)
 
     # Clear old data for verification run
     conn.execute("DELETE FROM backups")
     conn.execute("DELETE FROM analysis_history")
     conn.execute("DELETE FROM api_usage")
+    conn.execute("DELETE FROM system_monitors")
 
     # Insert mock backup data
     conn.execute("""
@@ -78,6 +92,55 @@ def populate_mock_data():
         "5m 34s",
         (datetime.datetime.now() - datetime.timedelta(hours=4)).isoformat()
     ))
+
+    # Insert mock Home Assistant system monitor data
+    import json
+    metrics_mock = {
+        "cpu": 24.5,
+        "ram": 58.2,
+        "disk": 41.7,
+        "cpu_temp": 48.0,
+        "cpu_unit": "%",
+        "ram_unit": "%",
+        "disk_unit": "%",
+        "cpu_temp_unit": "°C"
+    }
+    metadata_mock = {
+        "core_version": "2026.8.1",
+        "os_version": "12.4",
+        "update_available": True,
+        "updates": [
+            {
+                "name": "Home Assistant Core",
+                "installed_version": "2026.8.1",
+                "latest_version": "2026.8.2",
+                "release_summary": "Core patch release containing bugfixes for integrations and supervisor stability.",
+                "release_url": "https://www.home-assistant.io/changelogs/core-2026.8.2"
+            }
+        ]
+    }
+    log_snippet_mock = (
+        "2026-08-18 21:05:12.453 WARNING (MainThread) [homeassistant.components.http.ban] Login attempt or request with invalid authentication from 192.168.1.99\n"
+        "2026-08-18 21:10:04.120 WARNING (MainThread) [homeassistant.helpers.template] Template loop detected or execution took too long for sensor.solar_power\n"
+        "2026-08-18 21:15:30.981 WARNING (MainThread) [homeassistant.components.hue] Hue bridge connection lost, retrying in 10s"
+    )
+    conn.execute(
+        """
+        INSERT INTO system_monitors (id, name, type, status, last_run, metrics, metadata, message, log_snippet)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "home_assistant",
+            "Home Assistant",
+            "home_assistant",
+            "warning",
+            (datetime.datetime.now() - datetime.timedelta(minutes=5)).isoformat(),
+            json.dumps(metrics_mock),
+            json.dumps(metadata_mock),
+            "Connected. Issues: 3 warnings found in logs, update available",
+            log_snippet_mock
+        )
+    )
 
     
     # Insert mock API usage logs

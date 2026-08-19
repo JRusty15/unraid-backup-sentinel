@@ -57,6 +57,10 @@ function switchTab(tabId) {
         titleEl.textContent = 'Docker Services';
         subtitleEl.textContent = 'Operational health, container states, and responsive checks.';
         loadDockerStatus();
+    } else if (tabId === 'systems') {
+        titleEl.textContent = 'Remote Systems';
+        subtitleEl.textContent = 'Operational health, hardware utilization, and core system logs of remote servers.';
+        loadSystemsStatus();
     } else if (tabId === 'settings') {
         titleEl.textContent = 'System Settings';
         subtitleEl.textContent = 'Integration aids and database maintenance controls.';
@@ -435,6 +439,8 @@ function refreshData() {
             await loadRawLogs();
         } else if (currentTab === 'tokens') {
             await loadCostUsageData();
+        } else if (currentTab === 'systems') {
+            await loadSystemsStatus();
         } else if (currentTab === 'settings') {
             loadSettingsData();
         }
@@ -665,14 +671,14 @@ async function loadDockerStatus() {
 
 // Toggle Docker card expansion state
 function toggleDockerCardExpand(serviceId) {
-    const card = document.getElementById(`docker-card-${serviceId}`);
+    const card = document.getElementById(`docker-card-${serviceId}`) || document.getElementById(`system-card-${serviceId}`);
     if (!card) return;
     
     const isExpanded = card.classList.toggle('expanded');
     if (isExpanded) {
         expandedCards.add(serviceId);
         // Scroll logs to bottom immediately upon expansion
-        const panel = document.getElementById(`log-panel-${serviceId}`);
+        const panel = document.getElementById(`log-panel-${serviceId}`) || document.getElementById(`system-log-panel-${serviceId}`);
         if (panel) {
             panel.scrollTop = panel.scrollHeight;
         }
@@ -894,6 +900,246 @@ function parseSimpleMarkdown(mdText) {
     
     return html;
 }
+
+// Load Remote Systems Status
+async function loadSystemsStatus() {
+    const container = document.getElementById('systems-container');
+    if (!container) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/systems`);
+        if (!res.ok) throw new Error('Failed to fetch remote systems status');
+        const data = await res.json();
+        
+        container.innerHTML = '';
+        if (data.length === 0) {
+            container.innerHTML = '<p class="meta-text" style="grid-column: 1 / -1; text-align: center; padding: 2rem;">No remote systems monitored yet.</p>';
+            return;
+        }
+        
+        let latestTime = null;
+        data.sort((a, b) => a.name.localeCompare(b.name));
+        
+        data.forEach(system => {
+            const id = system.id;
+            const name = system.name;
+            const status = system.status.toLowerCase();
+            const lastRun = system.last_run;
+            const message = system.message || '';
+            const logs = system.log_snippet || 'No logs available.';
+            
+            if (lastRun) {
+                const checkTime = new Date(lastRun);
+                if (!latestTime || checkTime > latestTime) latestTime = checkTime;
+            }
+            
+            let metrics = {};
+            try {
+                metrics = typeof system.metrics === 'string' ? JSON.parse(system.metrics) : system.metrics || {};
+            } catch(e) {
+                console.error("Failed to parse metrics for " + id, e);
+            }
+            
+            let metadata = {};
+            try {
+                metadata = typeof system.metadata === 'string' ? JSON.parse(system.metadata) : system.metadata || {};
+            } catch(e) {
+                console.error("Failed to parse metadata for " + id, e);
+            }
+            
+            let statusClass = 'unknown';
+            let iconClass = 'fa-solid fa-server';
+            let iconColor = 'var(--text-secondary)';
+            
+            if (id === 'home_assistant') {
+                iconClass = 'fa-solid fa-house-laptop';
+            }
+            
+            if (status === 'healthy') {
+                statusClass = 'success';
+                iconColor = 'var(--color-success)';
+            } else if (status === 'critical') {
+                statusClass = 'failed';
+                iconClass = 'fa-solid fa-triangle-exclamation';
+                iconColor = 'var(--color-failed)';
+            } else if (status === 'warning') {
+                statusClass = 'warning';
+                iconClass = 'fa-solid fa-circle-exclamation';
+                iconColor = 'var(--color-warning)';
+            }
+            
+            const offset = (statusClass === 'unknown') ? '314' : '0';
+            const card = document.createElement('div');
+            card.className = 'card status-card docker-card'; // Reuse styled docker-card layout
+            card.id = `system-card-${id}`;
+            
+            if (expandedCards.has(id)) {
+                card.classList.add('expanded');
+            }
+            
+            // Build metrics UI
+            let metricsHtml = '';
+            if (metrics && (metrics.cpu !== undefined || metrics.ram !== undefined || metrics.disk !== undefined)) {
+                metricsHtml = `
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin: 1rem 0; width: 100%;">
+                        ${metrics.cpu !== null && metrics.cpu !== undefined ? `
+                            <div style="background: hsla(220,15%,15%,0.3); padding: 0.6rem 0.8rem; border-radius: 8px; border: 1px solid var(--border-card);">
+                                <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.25rem;">
+                                    <span>CPU Util</span>
+                                    <span style="font-weight:600; color:var(--text-primary);">${metrics.cpu}${metrics.cpu_unit || '%'}</span>
+                                </div>
+                                <div style="width:100%; height:6px; background:hsla(0,0%,100%,0.08); border-radius:3px; overflow:hidden;">
+                                    <div style="width:${metrics.cpu}%; height:100%; background:var(--color-success); border-radius:3px;"></div>
+                                </div>
+                            </div>
+                        ` : ''}
+                        ${metrics.ram !== null && metrics.ram !== undefined ? `
+                            <div style="background: hsla(220,15%,15%,0.3); padding: 0.6rem 0.8rem; border-radius: 8px; border: 1px solid var(--border-card);">
+                                <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.25rem;">
+                                    <span>Memory Usage</span>
+                                    <span style="font-weight:600; color:var(--text-primary);">${metrics.ram}${metrics.ram_unit || '%'}</span>
+                                </div>
+                                <div style="width:100%; height:6px; background:hsla(0,0%,100%,0.08); border-radius:3px; overflow:hidden;">
+                                    <div style="width:${metrics.ram}%; height:100%; background:hsl(200, 80%, 50%); border-radius:3px;"></div>
+                                </div>
+                            </div>
+                        ` : ''}
+                        ${metrics.disk !== null && metrics.disk !== undefined ? `
+                            <div style="background: hsla(220,15%,15%,0.3); padding: 0.6rem 0.8rem; border-radius: 8px; border: 1px solid var(--border-card);">
+                                <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.25rem;">
+                                    <span>Disk Space</span>
+                                    <span style="font-weight:600; color:var(--text-primary);">${metrics.disk}${metrics.disk_unit || '%'}</span>
+                                </div>
+                                <div style="width:100%; height:6px; background:hsla(0,0%,100%,0.08); border-radius:3px; overflow:hidden;">
+                                    <div style="width:${metrics.disk}%; height:100%; background:hsl(262, 85%, 65%); border-radius:3px;"></div>
+                                </div>
+                            </div>
+                        ` : ''}
+                        ${metrics.cpu_temp !== null && metrics.cpu_temp !== undefined ? `
+                            <div style="background: hsla(220,15%,15%,0.3); padding: 0.6rem 0.8rem; border-radius: 8px; border: 1px solid var(--border-card);">
+                                <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.25rem;">
+                                    <span>CPU Temp</span>
+                                    <span style="font-weight:600; color:var(--text-primary);">${metrics.cpu_temp}${metrics.cpu_temp_unit || '°C'}</span>
+                                </div>
+                                <div style="width:100%; height:6px; background:hsla(0,0%,100%,0.08); border-radius:3px; overflow:hidden;">
+                                    <div style="width:${Math.min(100, (metrics.cpu_temp / 100) * 100)}%; height:100%; background:var(--color-warning); border-radius:3px;"></div>
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+            
+            // Build updates banner HTML
+            let updatesHtml = '';
+            if (metadata.update_available && metadata.updates && metadata.updates.length > 0) {
+                updatesHtml = `
+                    <div style="margin: 0.75rem 0; padding: 0.75rem 1rem; border-radius: 10px; background: hsla(40, 90%, 50%, 0.08); border: 1px solid hsla(40, 90%, 50%, 0.25); text-align: left;">
+                        <div style="font-weight:700; font-size:0.85rem; color:var(--color-warning); display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+                            <i class="fa-solid fa-gift"></i> Update Available!
+                        </div>
+                        ${metadata.updates.map(u => `
+                            <div style="font-size: 0.8rem; line-height:1.4; margin-bottom: 0.5rem; border-bottom: 1px dashed hsla(220,15%,20%,0.5); padding-bottom:0.5rem; &:last-child { border:none; margin:0; padding:0; }">
+                                <strong style="color:var(--text-primary);">${escapeHtml(u.name)}</strong><br>
+                                <span style="color:var(--text-secondary);">Installed: <code>${escapeHtml(u.installed_version)}</code> ➡️ Latest: <code>${escapeHtml(u.latest_version)}</code></span>
+                                ${u.release_summary ? `<p style="margin-top:0.25rem; font-size:0.75rem; color:var(--text-secondary);">${escapeHtml(u.release_summary)}</p>` : ''}
+                                ${u.release_url ? `<a href="${escapeHtml(u.release_url)}" target="_blank" style="display:inline-block; margin-top:0.25rem; font-size:0.75rem; color:hsl(200, 80%, 60%); text-decoration:underline;"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:0.65rem;"></i> View Changelog</a>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            
+            card.innerHTML = `
+                <div class="docker-card-summary" onclick="toggleDockerCardExpand('${id}')">
+                    <div class="docker-card-title-group">
+                        <span class="status-indicator-dot ${statusClass}"></span>
+                        <h4 class="docker-card-title">${escapeHtml(name)}</h4>
+                    </div>
+                    <i class="fa-solid fa-chevron-down expand-chevron"></i>
+                </div>
+                
+                <div class="docker-card-details" onclick="event.stopPropagation()">
+                    <div class="docker-status-header" style="border: none; padding: 0;">
+                        <div class="docker-badges" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                            <span class="docker-badge ${statusClass === 'success' ? 'running' : statusClass}">${escapeHtml(status)}</span>
+                            ${metadata.core_version ? `<span class="docker-badge" style="background: hsla(220,15%,20%,0.6); color: var(--text-secondary); text-transform:none; border:1px solid var(--border-card);">Core: v${escapeHtml(metadata.core_version)}</span>` : ''}
+                            ${metadata.os_version ? `<span class="docker-badge" style="background: hsla(220,15%,20%,0.6); color: var(--text-secondary); text-transform:none; border:1px solid var(--border-card);">OS: v${escapeHtml(metadata.os_version)}</span>` : ''}
+                        </div>
+                    </div>
+                    
+                    <p class="timestamp-label" style="font-weight: 600; color: var(--text-primary); margin: 0; margin-top:0.25rem;">${escapeHtml(message)}</p>
+                    
+                    ${metricsHtml}
+                    ${updatesHtml}
+                    
+                    <div class="timestamp-label" style="margin-top:0.5rem; font-size:0.75rem;">Error / Warning Logs</div>
+                    <div class="docker-log-panel" id="system-log-panel-${id}" style="font-family: monospace; font-size:0.75rem; white-space:pre-wrap; word-break:break-all; max-height:160px; height:160px;">${escapeHtml(logs)}</div>
+                    
+                    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.75rem;">
+                        <button class="btn btn-secondary" onclick="triggerSystemSingleProbe('${id}')" id="btn-system-probe-${id}" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; flex-grow: 1;">
+                            <i class="fa-solid fa-arrows-rotate"></i> Check Health Now
+                        </button>
+                    </div>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+        
+        const timeLabel = document.getElementById('systems-last-checked');
+        if (timeLabel) {
+            if (latestTime) {
+                timeLabel.textContent = `Last checked: ${formatDate(latestTime.toISOString())}`;
+            } else {
+                timeLabel.textContent = 'Last checked: Never';
+            }
+        }
+        
+    } catch(err) {
+        container.innerHTML = `<p class="meta-text" style="grid-column: 1 / -1; text-align: center; color: var(--color-failed); padding: 2rem;">Error loading remote systems: ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+async function triggerSystemsProbe() {
+    const btn = document.getElementById('btn-probe-systems');
+    if (!btn) return;
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking...';
+    
+    try {
+        await fetch(`${API_BASE}/api/systems/home_assistant/probe`, { method: 'POST' });
+        setTimeout(async () => {
+            await loadSystemsStatus();
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Check All Now';
+        }, 3000);
+    } catch(err) {
+        alert("Failed to probe remote systems: " + err.message);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Check All Now';
+    }
+}
+
+async function triggerSystemSingleProbe(systemId) {
+    const btn = document.getElementById(`btn-system-probe-${systemId}`);
+    if (!btn) return;
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Probing...';
+    
+    try {
+        await fetch(`${API_BASE}/api/systems/${systemId}/probe`, { method: 'POST' });
+        setTimeout(async () => {
+            await loadSystemsStatus();
+        }, 3000);
+    } catch(err) {
+        alert("Failed to probe system: " + err.message);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Check Health Now';
+    }
+}
+
 // Initial Bootstrap load
 window.addEventListener('DOMContentLoaded', () => {
     refreshDashboardData();
@@ -905,6 +1151,8 @@ window.addEventListener('DOMContentLoaded', () => {
             loadBackupStatuses();
         } else if (currentTab === 'docker') {
             loadDockerStatus();
+        } else if (currentTab === 'systems') {
+            loadSystemsStatus();
         }
     }, 10000);
 });

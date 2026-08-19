@@ -33,6 +33,17 @@ PORT = int(os.getenv("PORT", "8080"))
 HEARTBEAT_RSYNC_HOURS = int(os.getenv("HEARTBEAT_RSYNC_HOURS", "26"))
 HEARTBEAT_DUPLICACY_HOURS = int(os.getenv("HEARTBEAT_DUPLICACY_HOURS", "240"))
 
+# Home Assistant configuration
+HA_URL = os.getenv("HA_URL", "")
+HA_TOKEN = os.getenv("HA_TOKEN", "")
+HA_ENTITY_CPU = os.getenv("HA_ENTITY_CPU", "sensor.system_monitor_processor_use")
+HA_ENTITY_CPU_TEMP = os.getenv("HA_ENTITY_CPU_TEMP", "sensor.system_monitor_processor_temperature")
+HA_ENTITY_RAM = os.getenv("HA_ENTITY_RAM", "sensor.system_monitor_memory_usage")
+HA_ENTITY_DISK = os.getenv("HA_ENTITY_DISK", "sensor.system_monitor_disk_usage")
+HA_ENTITY_CORE_UPDATE = os.getenv("HA_ENTITY_CORE_UPDATE", "update.home_assistant_core_update")
+HA_ENTITY_OS_UPDATE = os.getenv("HA_ENTITY_OS_UPDATE", "update.home_assistant_operating_system_update")
+
+
 # Cost tracking constants (Gemini 1.5 Flash prices)
 # Input: $0.075 / 1M tokens ($0.000000075 per token)
 # Output: $0.30 / 1M tokens ($0.000000300 per token)
@@ -146,6 +157,20 @@ def init_db():
             )
         """)
         
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_monitors (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                last_run TEXT,
+                metrics TEXT,
+                metadata TEXT,
+                message TEXT,
+                log_snippet TEXT
+            )
+        """)
+        
         # Migration for existing databases: add acknowledged_at column
         try:
             conn.execute("ALTER TABLE docker_services ADD COLUMN acknowledged_at TEXT")
@@ -173,6 +198,27 @@ def init_db():
             conn.execute(
                 "UPDATE docker_services SET container_name = ? WHERE id = ? AND container_name = ?",
                 ("binhex-plex", "plex", "plex")
+            )
+            
+        # Populate initial Home Assistant system monitor if it doesn't exist
+        cursor = conn.execute("SELECT 1 FROM system_monitors WHERE id = ?", ("home_assistant",))
+        if not cursor.fetchone():
+            conn.execute(
+                """
+                INSERT INTO system_monitors (id, name, type, status, last_run, metrics, metadata, message, log_snippet)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "home_assistant",
+                    "Home Assistant",
+                    "home_assistant",
+                    "unknown",
+                    None,
+                    "{}",
+                    "{}",
+                    "Waiting for first probe...",
+                    ""
+                )
             )
             
         conn.commit()
@@ -474,6 +520,25 @@ def get_rsync_recent_logs() -> str:
         logger.error("Error reading Rsync logs directory: %s", e)
         return f"Error reading Rsync logs directory: {str(e)}"
 
+def post_to_discord(payload: dict):
+    if not DISCORD_WEBHOOK_URL:
+        return
+    try:
+        import urllib.request
+        import json
+        req = urllib.request.Request(
+            DISCORD_WEBHOOK_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "unraid-sentinel"
+            }
+        )
+        urllib.request.urlopen(req)
+        logger.info("Sent Discord webhook notification successfully.")
+    except Exception as e:
+        logger.error("Failed to send Discord webhook: %s", e)
+
 def send_discord_notification(status: str, summary: str):
     if not DISCORD_WEBHOOK_URL:
         return
@@ -516,22 +581,8 @@ def send_discord_notification(status: str, summary: str):
             }
         ]
     }
-    
-    try:
-        import urllib.request
-        import json
-        req = urllib.request.Request(
-            DISCORD_WEBHOOK_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "User-Agent": "unraid-sentinel"
-            }
-        )
-        urllib.request.urlopen(req)
-        logger.info("Sent Discord webhook notification successfully.")
-    except Exception as e:
-        logger.error("Failed to send Discord webhook: %s", e)
+    post_to_discord(payload)
+
 
 # Core AI Analysis Runner
 async def run_log_analysis():
@@ -693,6 +744,283 @@ async def run_log_analysis():
             conn.execute(
                 "INSERT INTO analysis_history (timestamp, report, status, prompt_tokens, completion_tokens, cost) VALUES (?, ?, ?, ?, ?, ?)",
                 (datetime.datetime.now().isoformat(), error_report, "failed", 0, 0, 0.0)
+            )
+            conn.commit()
+
+def query_ha_api(endpoint: str) -> dict:
+    import urllib.request
+    import json
+    url = f"{HA_URL.rstrip('/')}{endpoint}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {HA_TOKEN}",
+            "Content-Type": "application/json"
+        },
+        method="GET"
+    )
+    with urllib.request.urlopen(req, timeout=5.0) as response:
+        if response.status == 200:
+            return json.loads(response.read().decode("utf-8"))
+        else:
+            raise Exception(f"HA API error: {response.status}")
+
+def query_ha_error_log() -> str:
+    import urllib.request
+    url = f"{HA_URL.rstrip('/')}/api/error_log"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {HA_TOKEN}"
+        },
+        method="GET"
+    )
+    with urllib.request.urlopen(req, timeout=5.0) as response:
+        if response.status == 200:
+            return response.read().decode("utf-8")
+        else:
+            raise Exception(f"HA error log API error: {response.status}")
+
+def send_ha_update_notification(updates: List[Dict]):
+    fields = []
+    for u in updates:
+        fields.append({
+            "name": u["name"],
+            "value": f"Installed: `{u['installed_version']}` ➡️ Latest: `{u['latest_version']}`\n[Release Notes]({u['release_url']})",
+            "inline": False
+        })
+    payload = {
+        "embeds": [
+            {
+                "title": "⚙️ Home Assistant Update Available",
+                "color": 15105570, # Orange
+                "fields": fields,
+                "footer": {"text": "Home Assistant Sentinel Monitor"}
+            }
+        ]
+    }
+    post_to_discord(payload)
+
+def send_ha_error_notification(new_errors: List[str]):
+    error_text = "\n".join(new_errors[:5])
+    if len(new_errors) > 5:
+        error_text += f"\n... and {len(new_errors) - 5} more errors."
+    payload = {
+        "embeds": [
+            {
+                "title": "🔴 Home Assistant Log Errors Detected",
+                "description": f"```\n{error_text}\n```",
+                "color": 15158332, # Red
+                "footer": {"text": "Home Assistant Sentinel Monitor"}
+            }
+        ]
+    }
+    post_to_discord(payload)
+
+async def probe_home_assistant():
+    logger.info("Probing Home Assistant...")
+    if not HA_URL or not HA_TOKEN:
+        logger.warning("HA_URL or HA_TOKEN is not configured. Skipping HA probe.")
+        return
+        
+    try:
+        import json
+        
+        # 1. Fetch Config
+        config = query_ha_api("/api/config")
+        core_version = config.get("version", "Unknown")
+        
+        # 2. Fetch States
+        states_list = query_ha_api("/api/states")
+        states_dict = {entity["entity_id"]: entity for entity in states_list}
+        
+        def get_entity_state_float(entity_id: str) -> Optional[float]:
+            entity = states_dict.get(entity_id)
+            if entity and entity.get("state") not in ["unknown", "unavailable"]:
+                try:
+                    return float(entity["state"])
+                except ValueError:
+                    return None
+            return None
+
+        # Gather metrics
+        cpu_entity = states_dict.get(HA_ENTITY_CPU)
+        ram_entity = states_dict.get(HA_ENTITY_RAM)
+        disk_entity = states_dict.get(HA_ENTITY_DISK)
+        cpu_temp_entity = states_dict.get(HA_ENTITY_CPU_TEMP)
+        
+        cpu_val = get_entity_state_float(HA_ENTITY_CPU)
+        ram_val = get_entity_state_float(HA_ENTITY_RAM)
+        disk_val = get_entity_state_float(HA_ENTITY_DISK)
+        cpu_temp_val = get_entity_state_float(HA_ENTITY_CPU_TEMP)
+        
+        cpu_unit = cpu_entity.get("attributes", {}).get("unit_of_measurement", "%") if cpu_entity else "%"
+        ram_unit = ram_entity.get("attributes", {}).get("unit_of_measurement", "%") if ram_entity else "%"
+        disk_unit = disk_entity.get("attributes", {}).get("unit_of_measurement", "%") if disk_entity else "%"
+        cpu_temp_unit = cpu_temp_entity.get("attributes", {}).get("unit_of_measurement", "°C") if cpu_temp_entity else "°C"
+        
+        metrics = {
+            "cpu": cpu_val,
+            "ram": ram_val,
+            "disk": disk_val,
+            "cpu_temp": cpu_temp_val,
+            "cpu_unit": cpu_unit,
+            "ram_unit": ram_unit,
+            "disk_unit": disk_unit,
+            "cpu_temp_unit": cpu_temp_unit
+        }
+        
+        # Gather updates
+        core_update = states_dict.get(HA_ENTITY_CORE_UPDATE)
+        os_update = states_dict.get(HA_ENTITY_OS_UPDATE)
+        
+        updates = []
+        update_available = False
+        
+        if core_update:
+            attrs = core_update.get("attributes", {})
+            state = core_update.get("state")
+            is_avail = (state == "on") or (attrs.get("installed_version") and attrs.get("latest_version") and attrs.get("installed_version") != attrs.get("latest_version"))
+            if is_avail:
+                update_available = True
+                updates.append({
+                    "name": "Home Assistant Core",
+                    "installed_version": attrs.get("installed_version"),
+                    "latest_version": attrs.get("latest_version"),
+                    "release_summary": attrs.get("release_summary") or "",
+                    "release_url": attrs.get("release_url") or ""
+                })
+                
+        if os_update:
+            attrs = os_update.get("attributes", {})
+            state = os_update.get("state")
+            is_avail = (state == "on") or (attrs.get("installed_version") and attrs.get("latest_version") and attrs.get("installed_version") != attrs.get("latest_version"))
+            if is_avail:
+                update_available = True
+                updates.append({
+                    "name": "Home Assistant Operating System",
+                    "installed_version": attrs.get("installed_version"),
+                    "latest_version": attrs.get("latest_version"),
+                    "release_summary": attrs.get("release_summary") or "",
+                    "release_url": attrs.get("release_url") or ""
+                })
+                
+        os_version = os_update.get("attributes", {}).get("installed_version") if os_update else None
+        
+        metadata = {
+            "core_version": core_version,
+            "os_version": os_version,
+            "update_available": update_available,
+            "updates": updates
+        }
+        
+        # 3. Fetch Log Contents
+        log_content = ""
+        try:
+            log_content = query_ha_error_log()
+        except Exception as le:
+            logger.error("Failed to fetch HA error logs: %s", le)
+            log_content = f"Error fetching HA logs: {str(le)}"
+            
+        # Parse logs
+        log_lines = log_content.splitlines()
+        errors = []
+        warnings = []
+        for line in log_lines:
+            lower_line = line.lower()
+            if "error" in lower_line or "critical" in lower_line or "exception" in lower_line:
+                errors.append(line)
+            elif "warning" in lower_line:
+                warnings.append(line)
+                
+        # Keep log snippet to a reasonable size
+        recent_errors_warnings = (errors + warnings)[-100:]
+        log_snippet = "\n".join(recent_errors_warnings) if recent_errors_warnings else "No errors or warnings in Home Assistant logs."
+        
+        # Determine status
+        status = "healthy"
+        status_reasons = []
+        if len(errors) > 0:
+            status = "critical"
+            status_reasons.append(f"{len(errors)} errors found in logs")
+        elif len(warnings) > 0:
+            status = "warning"
+            status_reasons.append(f"{len(warnings)} warnings found in logs")
+            
+        if update_available:
+            if status != "critical":
+                status = "warning"
+            status_reasons.append("update available")
+            
+        if not status_reasons:
+            message = f"Connected. Core v{core_version}"
+            if os_version:
+                message += f", OS v{os_version}"
+        else:
+            message = f"Connected. Issues: {', '.join(status_reasons)}"
+            
+        # 4. Compare with previous state to send Discord alerts
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with get_db() as conn:
+            cursor = conn.execute("SELECT metadata, log_snippet FROM system_monitors WHERE id = ?", ("home_assistant",))
+            row = cursor.fetchone()
+            
+            old_metadata = {}
+            old_log_snippet = ""
+            if row:
+                try:
+                    old_metadata = json.loads(row["metadata"]) if row["metadata"] else {}
+                except Exception:
+                    pass
+                old_log_snippet = row["log_snippet"] or ""
+                
+            # Check for new updates
+            old_update_avail = old_metadata.get("update_available", False)
+            if update_available and not old_update_avail:
+                send_ha_update_notification(updates)
+                
+            # Check for new errors
+            new_errors = [e for e in errors if e not in old_log_snippet]
+            if new_errors:
+                send_ha_error_notification(new_errors)
+                
+            # Write to database
+            conn.execute(
+                """
+                UPDATE system_monitors
+                SET status = ?, last_run = ?, metrics = ?, metadata = ?, message = ?, log_snippet = ?
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    timestamp,
+                    json.dumps(metrics),
+                    json.dumps(metadata),
+                    message,
+                    log_snippet,
+                    "home_assistant"
+                )
+            )
+            conn.commit()
+            
+        logger.info("Home Assistant probe completed successfully. Status: %s", status)
+        
+    except Exception as e:
+        logger.error("Failed to probe Home Assistant: %s", e)
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE system_monitors
+                SET status = ?, last_run = ?, message = ?
+                WHERE id = ?
+                """,
+                (
+                    "critical",
+                    timestamp,
+                    f"Connection failed: {str(e)}",
+                    "home_assistant"
+                )
             )
             conn.commit()
 
@@ -957,6 +1285,17 @@ async def start_docker_prober_loop():
             logger.error("Error in Docker prober loop: %s", e)
         await asyncio.sleep(900)
 
+async def start_systems_prober_loop():
+    logger.info("Starting Remote Systems prober loop...")
+    await asyncio.sleep(15)
+    while True:
+        try:
+            await probe_home_assistant()
+        except Exception as e:
+            logger.error("Error in Systems prober loop: %s", e)
+        await asyncio.sleep(600) # Probe every 10 minutes
+
+
 # Hourly background checker
 async def start_background_loop():
     logger.info("Starting background scheduler loop...")
@@ -1163,6 +1502,21 @@ def get_usage():
         "recent": recent
     }
 
+@app.get("/api/systems")
+def get_systems():
+    with get_db() as conn:
+        cursor = conn.execute("SELECT * FROM system_monitors")
+        systems = [dict(row) for row in cursor.fetchall()]
+    return systems
+
+@app.post("/api/systems/{system_id}/probe")
+async def trigger_system_probe(system_id: str, background_tasks: BackgroundTasks):
+    if system_id == "home_assistant":
+        background_tasks.add_task(probe_home_assistant)
+        return {"message": "Home Assistant probe triggered in background."}
+    else:
+        raise HTTPException(status_code=404, detail="System not found.")
+
 @app.post("/api/reset")
 def reset_database():
     try:
@@ -1171,6 +1525,7 @@ def reset_database():
             conn.execute("DELETE FROM analysis_history")
             conn.execute("DELETE FROM api_usage")
             conn.execute("DELETE FROM docker_services")
+            conn.execute("DELETE FROM system_monitors")
             conn.commit()
         init_db()
         logger.info("Database reset triggered via API.")
@@ -1424,6 +1779,8 @@ async def on_startup():
     init_db()
     asyncio.create_task(start_background_loop())
     asyncio.create_task(start_docker_prober_loop())
+    asyncio.create_task(start_systems_prober_loop())
+
 
 # Serve static files for frontend
 # Ensure frontend directory exists

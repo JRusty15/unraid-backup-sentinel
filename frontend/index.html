@@ -41,6 +41,9 @@
                 <button class="nav-item" id="btn-nav-docker" onclick="switchTab('docker')">
                     <i class="fa-solid fa-cubes"></i> Docker Services
                 </button>
+                <button class="nav-item" id="btn-nav-systems" onclick="switchTab('systems')">
+                    <i class="fa-solid fa-network-wired"></i> Remote Systems
+                </button>
                 <button class="nav-item" id="btn-nav-syslog" onclick="switchTab('syslog')">
                     <i class="fa-solid fa-server"></i> Logs & Syslog
                 </button>
@@ -161,6 +164,19 @@
                 </div>
                 <div class="backups-grid" id="docker-services-container">
                     <p class="meta-text" style="grid-column: 1 / -1; text-align: center; padding: 2rem;">Loading Docker service health statuses...</p>
+                </div>
+            </section>
+
+            <!-- Remote Systems Tab -->
+            <section class="tab-pane" id="tab-systems">
+                <div class="docker-dashboard-header" style="margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                    <p class="meta-text" id="systems-last-checked">Last checked: -</p>
+                    <button class="btn btn-secondary" id="btn-probe-systems" onclick="triggerSystemsProbe()" style="padding: 0.5rem 1rem; font-size: 0.85rem;">
+                        <i class="fa-solid fa-arrows-rotate"></i> Check All Now
+                    </button>
+                </div>
+                <div class="backups-grid" id="systems-container">
+                    <p class="meta-text" style="grid-column: 1 / -1; text-align: center; padding: 2rem;">Loading Remote Systems health statuses...</p>
                 </div>
             </section>
 
