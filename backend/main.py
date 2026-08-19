@@ -785,8 +785,8 @@ def query_ha_api(endpoint: str) -> dict:
         else:
             raise Exception(f"HA API error: {response.status}")
 
-async def query_ha_websocket() -> tuple:
-    import websockets
+def query_ha_websocket_sync() -> tuple:
+    import websocket
     import json
     
     ws_proto = "ws"
@@ -796,45 +796,47 @@ async def query_ha_websocket() -> tuple:
     host_port = HA_URL.split("://")[-1].rstrip('/')
     ws_url = f"{ws_proto}://{host_port}/api/websocket"
     
-    async with websockets.connect(ws_url, timeout=5.0) as websocket:
+    ws = websocket.WebSocket()
+    ws.connect(ws_url, timeout=5.0)
+    try:
         # 1. Wait for auth_required
-        msg = await websocket.recv()
+        msg = ws.recv()
         data = json.loads(msg)
         if data.get("type") != "auth_required":
             raise Exception(f"Unexpected WS response: {msg}")
             
         # 2. Send auth
-        await websocket.send(json.dumps({
+        ws.send(json.dumps({
             "type": "auth",
             "access_token": HA_TOKEN
         }))
         
         # 3. Wait for auth_ok
-        msg = await websocket.recv()
+        msg = ws.recv()
         data = json.loads(msg)
         if data.get("type") != "auth_ok":
             raise Exception(f"WS Authentication failed: {msg}")
             
         # 4. Request system logs (id=1)
-        await websocket.send(json.dumps({
+        ws.send(json.dumps({
             "id": 1,
             "type": "system_log/list"
         }))
         
         # 5. Wait for logs response
-        msg = await websocket.recv()
+        msg = ws.recv()
         logs_data = json.loads(msg)
         if not logs_data.get("success"):
             raise Exception(f"WS logs command failed: {logs_data.get('error', {}).get('message', 'Unknown error')}")
             
         # 6. Request repairs list (id=2)
-        await websocket.send(json.dumps({
+        ws.send(json.dumps({
             "id": 2,
             "type": "repairs/list_issues"
         }))
         
         # 7. Wait for repairs response
-        msg = await websocket.recv()
+        msg = ws.recv()
         repairs_data = json.loads(msg)
         if not repairs_data.get("success"):
             raise Exception(f"WS repairs command failed: {repairs_data.get('error', {}).get('message', 'Unknown error')}")
@@ -847,6 +849,8 @@ async def query_ha_websocket() -> tuple:
             issues_list = res_val
             
         return logs_data.get("result", []), issues_list
+    finally:
+        ws.close()
 
 async def send_ha_update_notification(updates: List[Dict]):
     fields = []
@@ -981,7 +985,8 @@ async def probe_home_assistant():
         log_fetch_error = None
         
         try:
-            ws_logs, ws_issues = await query_ha_websocket()
+            loop = asyncio.get_running_loop()
+            ws_logs, ws_issues = await loop.run_in_executor(None, query_ha_websocket_sync)
         except Exception as le:
             logger.error("Failed to query HA WebSocket: %s", le)
             log_fetch_error = f"Error fetching HA logs: {str(le)}"
