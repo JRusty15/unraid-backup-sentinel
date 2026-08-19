@@ -785,21 +785,68 @@ def query_ha_api(endpoint: str) -> dict:
         else:
             raise Exception(f"HA API error: {response.status}")
 
-def query_ha_error_log() -> str:
-    import urllib.request
-    url = f"{HA_URL.rstrip('/')}/api/error_log"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Authorization": f"Bearer {HA_TOKEN}"
-        },
-        method="GET"
-    )
-    with urllib.request.urlopen(req, timeout=5.0) as response:
-        if response.status == 200:
-            return response.read().decode("utf-8")
-        else:
-            raise Exception(f"HA error log API error: {response.status}")
+async def query_ha_websocket() -> tuple:
+    import websockets
+    import json
+    
+    ws_proto = "ws"
+    if HA_URL.startswith("https://"):
+        ws_proto = "wss"
+        
+    host_port = HA_URL.split("://")[-1].rstrip('/')
+    ws_url = f"{ws_proto}://{host_port}/api/websocket"
+    
+    async with websockets.connect(ws_url, timeout=5.0) as websocket:
+        # 1. Wait for auth_required
+        msg = await websocket.recv()
+        data = json.loads(msg)
+        if data.get("type") != "auth_required":
+            raise Exception(f"Unexpected WS response: {msg}")
+            
+        # 2. Send auth
+        await websocket.send(json.dumps({
+            "type": "auth",
+            "access_token": HA_TOKEN
+        }))
+        
+        # 3. Wait for auth_ok
+        msg = await websocket.recv()
+        data = json.loads(msg)
+        if data.get("type") != "auth_ok":
+            raise Exception(f"WS Authentication failed: {msg}")
+            
+        # 4. Request system logs (id=1)
+        await websocket.send(json.dumps({
+            "id": 1,
+            "type": "system_log/list"
+        }))
+        
+        # 5. Wait for logs response
+        msg = await websocket.recv()
+        logs_data = json.loads(msg)
+        if not logs_data.get("success"):
+            raise Exception(f"WS logs command failed: {logs_data.get('error', {}).get('message', 'Unknown error')}")
+            
+        # 6. Request repairs list (id=2)
+        await websocket.send(json.dumps({
+            "id": 2,
+            "type": "repairs/list_issues"
+        }))
+        
+        # 7. Wait for repairs response
+        msg = await websocket.recv()
+        repairs_data = json.loads(msg)
+        if not repairs_data.get("success"):
+            raise Exception(f"WS repairs command failed: {repairs_data.get('error', {}).get('message', 'Unknown error')}")
+            
+        res_val = repairs_data.get("result")
+        issues_list = []
+        if isinstance(res_val, dict):
+            issues_list = res_val.get("issues", [])
+        elif isinstance(res_val, list):
+            issues_list = res_val
+            
+        return logs_data.get("result", []), issues_list
 
 async def send_ha_update_notification(updates: List[Dict]):
     fields = []
@@ -928,36 +975,72 @@ async def probe_home_assistant():
                 
         os_version = os_update.get("attributes", {}).get("installed_version") if os_update else None
         
-        metadata = {
-            "core_version": core_version,
-            "os_version": os_version,
-            "update_available": update_available,
-            "updates": updates
-        }
-        
-        # 3. Fetch Log Contents
-        log_content = ""
+        # 3. Fetch Log Contents & Repairs via WebSocket
+        ws_logs = []
+        ws_issues = []
         log_fetch_error = None
+        
         try:
-            log_content = query_ha_error_log()
+            ws_logs, ws_issues = await query_ha_websocket()
         except Exception as le:
-            logger.error("Failed to fetch HA error logs: %s", le)
+            logger.error("Failed to query HA WebSocket: %s", le)
             log_fetch_error = f"Error fetching HA logs: {str(le)}"
             
         # Parse logs only if they were successfully fetched
         errors = []
         warnings = []
         if not log_fetch_error:
-            log_lines = log_content.splitlines()
-            for line in log_lines:
-                lower_line = line.lower()
-                if "error" in lower_line or "critical" in lower_line or "exception" in lower_line:
-                    errors.append(line)
-                elif "warning" in lower_line:
-                    warnings.append(line)
-            log_snippet = "\n".join((errors + warnings)[-100:]) if (errors + warnings) else "No errors or warnings in Home Assistant logs."
+            log_snippet_lines = []
+            for entry in ws_logs:
+                ts = entry.get("timestamp", 0)
+                try:
+                    dt = datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    dt = str(ts)
+                level = entry.get("level", "WARNING").upper()
+                msg = entry.get("message", "")
+                if isinstance(msg, list):
+                    msg = " ".join(str(m) for m in msg)
+                if entry.get("exception"):
+                    msg += f"\n{entry['exception']}"
+                source = entry.get("name", "unknown")
+                
+                log_line = f"{level} ({source}) {msg}"
+                if level in ["ERROR", "CRITICAL"]:
+                    errors.append(log_line)
+                elif level == "WARNING":
+                    warnings.append(log_line)
+                log_snippet_lines.append(f"{dt} {level} ({source}) {msg}")
+                
+            log_snippet = "\n".join(log_snippet_lines[-100:]) if log_snippet_lines else "No errors or warnings in Home Assistant logs."
         else:
             log_snippet = log_fetch_error
+
+        # Parse repairs / active issues
+        issues = []
+        for issue in ws_issues:
+            domain = issue.get("domain", "system")
+            issue_id = issue.get("issue_id", "")
+            title = issue_id.replace("_", " ").capitalize() if issue_id else "System issue"
+            severity = issue.get("severity", "warning")
+            desc = ""
+            placeholders = issue.get("translation_placeholders")
+            if placeholders and isinstance(placeholders, dict):
+                desc = ", ".join(f"{k}: {v}" for k, v in placeholders.items())
+            issues.append({
+                "domain": domain,
+                "title": title,
+                "severity": severity,
+                "description": desc
+            })
+
+        metadata = {
+            "core_version": core_version,
+            "os_version": os_version,
+            "update_available": update_available,
+            "updates": updates,
+            "issues": issues
+        }
         
         # Determine status
         status = "healthy"
@@ -968,6 +1051,11 @@ async def probe_home_assistant():
         elif len(warnings) > 0:
             status = "warning"
             status_reasons.append(f"{len(warnings)} warnings found in logs")
+            
+        if len(issues) > 0:
+            if status != "critical":
+                status = "warning"
+            status_reasons.append(f"{len(issues)} active repair issues")
             
         if log_fetch_error:
             if status != "critical":

@@ -1050,6 +1050,31 @@ async function loadSystemsStatus() {
                 `;
             }
             
+            // Build repairs/issues UI
+            let repairsHtml = '';
+            if (metadata.issues && metadata.issues.length > 0) {
+                repairsHtml = `
+                    <div style="margin: 0.75rem 0; padding: 0.75rem 1rem; border-radius: 10px; background: hsla(0, 90%, 50%, 0.05); border: 1px solid hsla(0, 90%, 50%, 0.2); text-align: left;">
+                        <div style="font-weight:700; font-size:0.85rem; color:var(--color-failed); display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+                            <i class="fa-solid fa-triangle-exclamation"></i> Active Repair Issues / Warnings
+                        </div>
+                        ${metadata.issues.map(issue => {
+                            const domain = issue.domain || 'system';
+                            const title = issue.title || 'System issue';
+                            const desc = issue.description || '';
+                            const severity = issue.severity || 'warning';
+                            const color = severity === 'error' || severity === 'critical' ? 'var(--color-failed)' : 'var(--color-warning)';
+                            return `
+                                <div style="font-size: 0.8rem; line-height:1.4; margin-bottom: 0.5rem; border-bottom: 1px dashed hsla(220,15%,20%,0.5); padding-bottom:0.5rem; &:last-child { border:none; margin:0; padding:0; }">
+                                    <strong style="color:var(--text-primary);"><span style="color:${color};">[${domain.toUpperCase()}]</span> ${escapeHtml(title)}</strong>
+                                    ${desc ? `<p style="margin-top:0.15rem; font-size:0.75rem; color:var(--text-secondary);">${escapeHtml(desc)}</p>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+            }
+            
             card.innerHTML = `
                 <div class="docker-card-summary" onclick="toggleDockerCardExpand('${id}')">
                     <div class="docker-card-title-group">
@@ -1072,6 +1097,7 @@ async function loadSystemsStatus() {
                     
                     ${metricsHtml}
                     ${updatesHtml}
+                    ${repairsHtml}
                     
                     <div class="timestamp-label" style="margin-top:0.5rem; font-size:0.75rem;">Error / Warning Logs</div>
                     <div class="docker-log-panel" id="system-log-panel-${id}" style="font-family: monospace; font-size:0.75rem; white-space:pre-wrap; word-break:break-all; max-height:160px; height:160px;">${escapeHtml(logs)}</div>
