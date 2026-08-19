@@ -937,26 +937,27 @@ async def probe_home_assistant():
         
         # 3. Fetch Log Contents
         log_content = ""
+        log_fetch_error = None
         try:
             log_content = query_ha_error_log()
         except Exception as le:
             logger.error("Failed to fetch HA error logs: %s", le)
-            log_content = f"Error fetching HA logs: {str(le)}"
+            log_fetch_error = f"Error fetching HA logs: {str(le)}"
             
-        # Parse logs
-        log_lines = log_content.splitlines()
+        # Parse logs only if they were successfully fetched
         errors = []
         warnings = []
-        for line in log_lines:
-            lower_line = line.lower()
-            if "error" in lower_line or "critical" in lower_line or "exception" in lower_line:
-                errors.append(line)
-            elif "warning" in lower_line:
-                warnings.append(line)
-                
-        # Keep log snippet to a reasonable size
-        recent_errors_warnings = (errors + warnings)[-100:]
-        log_snippet = "\n".join(recent_errors_warnings) if recent_errors_warnings else "No errors or warnings in Home Assistant logs."
+        if not log_fetch_error:
+            log_lines = log_content.splitlines()
+            for line in log_lines:
+                lower_line = line.lower()
+                if "error" in lower_line or "critical" in lower_line or "exception" in lower_line:
+                    errors.append(line)
+                elif "warning" in lower_line:
+                    warnings.append(line)
+            log_snippet = "\n".join((errors + warnings)[-100:]) if (errors + warnings) else "No errors or warnings in Home Assistant logs."
+        else:
+            log_snippet = log_fetch_error
         
         # Determine status
         status = "healthy"
@@ -967,6 +968,11 @@ async def probe_home_assistant():
         elif len(warnings) > 0:
             status = "warning"
             status_reasons.append(f"{len(warnings)} warnings found in logs")
+            
+        if log_fetch_error:
+            if status != "critical":
+                status = "warning"
+            status_reasons.append("log access unavailable")
             
         if update_available:
             if status != "critical":

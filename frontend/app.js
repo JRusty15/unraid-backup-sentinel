@@ -75,8 +75,8 @@ async function refreshDashboardData() {
 
 // Helper to escape HTML characters
 function escapeHtml(unsafe) {
-    if (!unsafe) return "";
-    return unsafe
+    if (unsafe === undefined || unsafe === null) return "";
+    return String(unsafe)
          .replace(/&/g, "&amp;")
          .replace(/</g, "&lt;")
          .replace(/>/g, "&gt;")
@@ -923,7 +923,7 @@ async function loadSystemsStatus() {
         data.forEach(system => {
             const id = system.id;
             const name = system.name;
-            const status = system.status.toLowerCase();
+            const status = (system.status || 'unknown').toLowerCase();
             const lastRun = system.last_run;
             const message = system.message || '';
             const logs = system.log_snippet || 'No logs available.';
