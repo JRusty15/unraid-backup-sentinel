@@ -1807,6 +1807,10 @@ def delete_docker_service(service_id: str):
 class IgnorePatternRequest(BaseModel):
     pattern: str
 
+class EditIgnorePatternRequest(BaseModel):
+    old_pattern: str
+    new_pattern: str
+
 @app.post("/api/docker/service/{service_id}/analyze")
 def analyze_docker_service_logs(service_id: str):
     if not GEMINI_API_KEY:
@@ -1859,10 +1863,14 @@ Keep the tone concise, reassuring, and DevOps-expert level. Avoid long intros or
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/docker/service/{service_id}/ignore")
-def add_ignore_pattern(service_id: str, payload: IgnorePatternRequest):
+def add_ignore_pattern(service_id: str, payload: IgnorePatternRequest, background_tasks: BackgroundTasks):
     try:
-        new_pattern = payload.pattern.strip().lower()
-        if not new_pattern:
+        raw_pattern = payload.pattern.strip().lower()
+        if not raw_pattern:
+            raise HTTPException(status_code=400, detail="Pattern cannot be empty.")
+            
+        new_patterns = [p.strip().lower() for p in raw_pattern.split(",") if p.strip()]
+        if not new_patterns:
             raise HTTPException(status_code=400, detail="Pattern cannot be empty.")
             
         with get_db() as conn:
@@ -1874,23 +1882,70 @@ def add_ignore_pattern(service_id: str, payload: IgnorePatternRequest):
             current = row["ignore_patterns"]
             if current:
                 patterns = [p.strip().lower() for p in current.split(",") if p.strip()]
-                if new_pattern not in patterns:
-                    patterns.append(new_pattern)
+                for np in new_patterns:
+                    if np not in patterns:
+                        patterns.append(np)
                 updated = ",".join(patterns)
             else:
-                updated = new_pattern
+                updated = ",".join(new_patterns)
                 
             conn.execute("UPDATE docker_services SET ignore_patterns = ? WHERE id = ?", (updated, service_id))
             conn.commit()
             
-        logger.info("Added ignore pattern '%s' to service '%s'.", new_pattern, service_id)
-        return {"message": f"Successfully ignored pattern '{new_pattern}'."}
+        background_tasks.add_task(probe_docker_services)
+        logger.info("Added ignore patterns %s to service '%s'.", new_patterns, service_id)
+        return {"message": "Successfully added ignore pattern(s)."}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to add ignore pattern: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.put("/api/docker/service/{service_id}/ignore")
+def edit_docker_ignore_pattern(service_id: str, payload: EditIgnorePatternRequest, background_tasks: BackgroundTasks):
+    try:
+        old_p = payload.old_pattern.strip().lower()
+        new_p = payload.new_pattern.strip().lower()
+        if not new_p:
+            raise HTTPException(status_code=400, detail="New pattern cannot be empty.")
+            
+        with get_db() as conn:
+            cursor = conn.execute("SELECT ignore_patterns FROM docker_services WHERE id = ?", (service_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Service not found.")
+                
+            current = row["ignore_patterns"]
+            if not current:
+                raise HTTPException(status_code=404, detail="No ignore patterns exist.")
+                
+            patterns = [p.strip().lower() for p in current.split(",") if p.strip()]
+            if old_p in patterns:
+                idx = patterns.index(old_p)
+                patterns[idx] = new_p
+                # deduplicate while preserving order
+                seen = set()
+                deduped = []
+                for p in patterns:
+                    if p not in seen:
+                        seen.add(p)
+                        deduped.append(p)
+                updated = ",".join(deduped)
+                conn.execute("UPDATE docker_services SET ignore_patterns = ? WHERE id = ?", (updated, service_id))
+                conn.commit()
+                background_tasks.add_task(probe_docker_services)
+                logger.info("Edited ignore pattern in service '%s' from '%s' to '%s'.", service_id, old_p, new_p)
+                return {"message": f"Successfully updated pattern to '{new_p}'."}
+            else:
+                raise HTTPException(status_code=404, detail="Original pattern not found.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to edit ignore pattern: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/api/docker/service/{service_id}/ignore")
-def delete_ignore_pattern(service_id: str, pattern: str):
+def delete_ignore_pattern(service_id: str, pattern: str, background_tasks: BackgroundTasks):
     try:
         target_pattern = pattern.strip().lower()
         with get_db() as conn:
@@ -1911,8 +1966,11 @@ def delete_ignore_pattern(service_id: str, pattern: str):
             conn.execute("UPDATE docker_services SET ignore_patterns = ? WHERE id = ?", (updated, service_id))
             conn.commit()
             
+        background_tasks.add_task(probe_docker_services)
         logger.info("Removed ignore pattern '%s' from service '%s'.", target_pattern, service_id)
         return {"message": f"Successfully stopped ignoring pattern '{target_pattern}'."}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to delete ignore pattern: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -1997,10 +2055,14 @@ Keep the tone concise, reassuring, and DevOps-expert level. Avoid long intros or
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/systems/{system_id}/ignore")
-def add_system_ignore_pattern(system_id: str, payload: IgnorePatternRequest):
+def add_system_ignore_pattern(system_id: str, payload: IgnorePatternRequest, background_tasks: BackgroundTasks):
     try:
-        new_pattern = payload.pattern.strip().lower()
-        if not new_pattern:
+        raw_pattern = payload.pattern.strip().lower()
+        if not raw_pattern:
+            raise HTTPException(status_code=400, detail="Pattern cannot be empty.")
+            
+        new_patterns = [p.strip().lower() for p in raw_pattern.split(",") if p.strip()]
+        if not new_patterns:
             raise HTTPException(status_code=400, detail="Pattern cannot be empty.")
             
         with get_db() as conn:
@@ -2012,23 +2074,73 @@ def add_system_ignore_pattern(system_id: str, payload: IgnorePatternRequest):
             current = row["ignore_patterns"]
             if current:
                 patterns = [p.strip().lower() for p in current.split(",") if p.strip()]
-                if new_pattern not in patterns:
-                    patterns.append(new_pattern)
+                for np in new_patterns:
+                    if np not in patterns:
+                        patterns.append(np)
                 updated = ",".join(patterns)
             else:
-                updated = new_pattern
+                updated = ",".join(new_patterns)
                 
             conn.execute("UPDATE system_monitors SET ignore_patterns = ? WHERE id = ?", (updated, system_id))
             conn.commit()
             
-        logger.info("Added ignore pattern '%s' to system '%s'.", new_pattern, system_id)
-        return {"message": f"Successfully ignored pattern '{new_pattern}'."}
+        if system_id == "home_assistant":
+            background_tasks.add_task(probe_home_assistant)
+            
+        logger.info("Added ignore patterns %s to system '%s'.", new_patterns, system_id)
+        return {"message": "Successfully added ignore pattern(s)."}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to add ignore pattern: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.put("/api/systems/{system_id}/ignore")
+def edit_system_ignore_pattern(system_id: str, payload: EditIgnorePatternRequest, background_tasks: BackgroundTasks):
+    try:
+        old_p = payload.old_pattern.strip().lower()
+        new_p = payload.new_pattern.strip().lower()
+        if not new_p:
+            raise HTTPException(status_code=400, detail="New pattern cannot be empty.")
+            
+        with get_db() as conn:
+            cursor = conn.execute("SELECT ignore_patterns FROM system_monitors WHERE id = ?", (system_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="System not found.")
+                
+            current = row["ignore_patterns"]
+            if not current:
+                raise HTTPException(status_code=404, detail="No ignore patterns exist.")
+                
+            patterns = [p.strip().lower() for p in current.split(",") if p.strip()]
+            if old_p in patterns:
+                idx = patterns.index(old_p)
+                patterns[idx] = new_p
+                # deduplicate while preserving order
+                seen = set()
+                deduped = []
+                for p in patterns:
+                    if p not in seen:
+                        seen.add(p)
+                        deduped.append(p)
+                updated = ",".join(deduped)
+                conn.execute("UPDATE system_monitors SET ignore_patterns = ? WHERE id = ?", (updated, system_id))
+                conn.commit()
+                if system_id == "home_assistant":
+                    background_tasks.add_task(probe_home_assistant)
+                logger.info("Edited ignore pattern in system '%s' from '%s' to '%s'.", system_id, old_p, new_p)
+                return {"message": f"Successfully updated pattern to '{new_p}'."}
+            else:
+                raise HTTPException(status_code=404, detail="Original pattern not found.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to edit ignore pattern: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/api/systems/{system_id}/ignore")
-def delete_system_ignore_pattern(system_id: str, pattern: str):
+def delete_system_ignore_pattern(system_id: str, pattern: str, background_tasks: BackgroundTasks):
     try:
         target_pattern = pattern.strip().lower()
         with get_db() as conn:
@@ -2047,10 +2159,14 @@ def delete_system_ignore_pattern(system_id: str, pattern: str):
                 updated = ",".join(patterns) if patterns else None
                 conn.execute("UPDATE system_monitors SET ignore_patterns = ? WHERE id = ?", (updated, system_id))
                 conn.commit()
+                if system_id == "home_assistant":
+                    background_tasks.add_task(probe_home_assistant)
                 logger.info("Deleted ignore pattern '%s' from system '%s'.", target_pattern, system_id)
                 return {"message": f"Successfully removed ignore pattern '{target_pattern}'."}
             else:
                 return {"message": "Ignore pattern not found."}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to delete ignore pattern: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

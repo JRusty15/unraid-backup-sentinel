@@ -4,6 +4,8 @@
 let currentTab = 'dashboard';
 const API_BASE = ''; // Same host
 const expandedCards = new Set();
+const openDockerFilterPanels = new Set();
+const openSystemFilterPanels = new Set();
 // Persist AI analysis across page reloads using localStorage
 const aiAnalysisCache = {
     get: (id) => localStorage.getItem(`ai_analysis_${id}`),
@@ -636,24 +638,33 @@ async function loadDockerStatus() {
                         <button class="btn btn-secondary" onclick="analyzeLogsWithAI('${id}')" id="btn-ai-analyze-${id}" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; background-color: hsla(262, 85%, 65%, 0.1); border-color: hsla(262, 85%, 65%, 0.3); color: hsl(262, 85%, 65%); flex-grow: 1;">
                             <i class="fa-solid fa-brain"></i> Analyze Logs with AI
                         </button>
-                        <button class="btn btn-secondary" onclick="toggleIgnorePatternUI('${id}')" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; flex-grow: 1;">
-                            <i class="fa-solid fa-filter-circle-xmark"></i> Mute Log Alert
+                        <button class="btn btn-secondary" onclick="toggleIgnorePatternUI('${id}')" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; flex-grow: 1; display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem;">
+                            <i class="fa-solid fa-filter"></i> Filters
+                            ${ignorePatterns.length > 0 ? `<span style="background: hsl(210, 90%, 55%); color: white; border-radius: 999px; padding: 0.05rem 0.45rem; font-size: 0.65rem; font-weight: 700;">${ignorePatterns.length}</span>` : ''}
                         </button>
                     </div>
                     
                     <!-- Ignore Pattern Form -->
-                    <div id="ignore-pattern-ui-${id}" style="display: none; flex-direction: column; gap: 0.5rem; border: 1px dashed var(--border-card); padding: 0.75rem; border-radius: 6px; background-color: hsla(220, 15%, 15%, 0.2);">
-                        <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-primary); text-align: left;">Mute alerts for matching strings (case-insensitive):</div>
-                        <div style="display: flex; gap: 0.5rem; width: 100%;">
-                            <input type="text" id="input-ignore-${id}" placeholder="e.g. parsing size failed" style="flex-grow: 1; font-size: 0.75rem; padding: 0.4rem; background: var(--bg-body); border: 1px solid var(--border-card); border-radius: 4px; color: var(--text-primary);">
-                            <button class="btn btn-secondary" onclick="addIgnorePattern('${id}')" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; background: var(--color-success); border: none; color: white;">Add</button>
+                    <div id="ignore-pattern-ui-${id}" style="display: ${openDockerFilterPanels.has(id) ? 'flex' : 'none'}; flex-direction: column; gap: 0.5rem; border: 1px dashed var(--border-card); padding: 0.75rem; border-radius: 6px; background-color: hsla(220, 15%, 15%, 0.3); margin-top: 0.5rem;">
+                        <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-primary); text-align: left;">
+                            <i class="fa-solid fa-filter"></i> Ignore Log Patterns (${ignorePatterns.length})
                         </div>
-                        <div id="ignore-patterns-list-${id}" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.25rem; text-align: left;">
-                            ${ignorePatterns.length === 0 ? '<span style="font-size: 0.7rem; color: var(--text-muted);">No muted patterns yet.</span>' : 
+                        <div style="display: flex; gap: 0.5rem; width: 100%;">
+                            <input type="text" id="input-ignore-${id}" placeholder="Add pattern (e.g. parsing size failed)..." onkeydown="if(event.key === 'Enter') addIgnorePattern('${id}')" style="flex-grow: 1; font-size: 0.75rem; padding: 0.45rem 0.6rem; background: var(--bg-body); border: 1px solid var(--border-card); border-radius: 4px; color: var(--text-primary);">
+                            <button class="btn btn-secondary" onclick="addIgnorePattern('${id}')" style="font-size: 0.75rem; padding: 0.45rem 0.85rem; background: var(--color-success); border: none; color: white; display: inline-flex; align-items: center; gap: 0.3rem;">
+                                <i class="fa-solid fa-plus"></i> Add
+                            </button>
+                        </div>
+                        <div style="font-size: 0.68rem; color: var(--text-muted); text-align: left;">
+                            Case-insensitive match. Comma-separated allowed. Click <i class="fa-solid fa-pencil" style="font-size:0.65rem;"></i> to edit, <i class="fa-solid fa-xmark" style="font-size:0.65rem;"></i> to delete.
+                        </div>
+                        <div id="ignore-patterns-list-${id}" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.25rem; text-align: left; max-height: 180px; overflow-y: auto; padding-right: 0.25rem;">
+                            ${ignorePatterns.length === 0 ? '<span style="font-size: 0.72rem; color: var(--text-muted); font-style: italic;">No active filters. All errors will be reported.</span>' : 
                                 ignorePatterns.map(p => `
-                                    <span class="docker-badge" style="background-color: hsla(0, 0%, 20%, 0.6); color: var(--text-secondary); display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.7rem; border: 1px solid var(--border-card); padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: none;">
-                                        "${escapeHtml(p)}"
-                                        <i class="fa-solid fa-xmark" onclick="removeIgnorePattern('${id}', '${p}')" style="cursor: pointer; color: var(--color-failed); font-size: 0.75rem;"></i>
+                                    <span class="docker-badge" style="background-color: hsla(220, 15%, 22%, 0.7); color: var(--text-primary); display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; border: 1px solid var(--border-card); padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: none;">
+                                        <span style="font-family: monospace;">"${escapeHtml(p)}"</span>
+                                        <i class="fa-solid fa-pencil" onclick="editIgnorePattern('${id}', '${escapeHtml(p).replace(/'/g, "\\'")}')" title="Edit filter pattern" style="cursor: pointer; color: var(--text-secondary); font-size: 0.7rem;"></i>
+                                        <i class="fa-solid fa-xmark" onclick="removeIgnorePattern('${id}', '${escapeHtml(p).replace(/'/g, "\\'")}')" title="Remove filter" style="cursor: pointer; color: var(--color-failed); font-size: 0.75rem;"></i>
                                     </span>
                                 `).join('')
                             }
@@ -832,7 +843,15 @@ function clearCachedAIAnalysis(serviceId) {
 function toggleIgnorePatternUI(serviceId) {
     const panel = document.getElementById(`ignore-pattern-ui-${serviceId}`);
     if (!panel) return;
-    panel.style.display = (panel.style.display === 'none') ? 'flex' : 'none';
+    if (panel.style.display === 'none') {
+        panel.style.display = 'flex';
+        openDockerFilterPanels.add(serviceId);
+        const input = document.getElementById(`input-ignore-${serviceId}`);
+        if (input) input.focus();
+    } else {
+        panel.style.display = 'none';
+        openDockerFilterPanels.delete(serviceId);
+    }
 }
 
 // Add a permanent ignore log string pattern
@@ -847,19 +866,44 @@ async function addIgnorePattern(serviceId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pattern })
         });
-        if (!res.ok) throw new Error('Failed to save ignore pattern');
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || 'Failed to save ignore pattern');
+        }
         
         input.value = '';
+        openDockerFilterPanels.add(serviceId);
         await loadDockerStatus();
-        
-        // Retain ignore UI visibility after reload
-        setTimeout(() => {
-            const panel = document.getElementById(`ignore-pattern-ui-${serviceId}`);
-            if (panel) panel.style.display = 'flex';
-        }, 100);
-        
     } catch (err) {
         alert("Failed to add ignore pattern: " + err.message);
+    }
+}
+
+// Edit an ignored pattern
+async function editIgnorePattern(serviceId, oldPattern) {
+    const newPattern = prompt(`Edit filter pattern:`, oldPattern);
+    if (newPattern === null) return;
+    const trimmed = newPattern.trim().toLowerCase();
+    if (!trimmed) {
+        alert("Filter pattern cannot be empty.");
+        return;
+    }
+    if (trimmed === oldPattern.toLowerCase()) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/docker/service/${serviceId}/ignore`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_pattern: oldPattern, new_pattern: trimmed })
+        });
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || 'Failed to edit ignore pattern');
+        }
+        openDockerFilterPanels.add(serviceId);
+        await loadDockerStatus();
+    } catch (err) {
+        alert("Failed to edit ignore pattern: " + err.message);
     }
 }
 
@@ -869,16 +913,13 @@ async function removeIgnorePattern(serviceId, pattern) {
         const res = await fetch(`${API_BASE}/api/docker/service/${serviceId}/ignore?pattern=${encodeURIComponent(pattern)}`, {
             method: 'DELETE'
         });
-        if (!res.ok) throw new Error('Failed to delete ignore pattern');
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || 'Failed to delete ignore pattern');
+        }
         
+        openDockerFilterPanels.add(serviceId);
         await loadDockerStatus();
-        
-        // Retain ignore UI visibility after reload
-        setTimeout(() => {
-            const panel = document.getElementById(`ignore-pattern-ui-${serviceId}`);
-            if (panel) panel.style.display = 'flex';
-        }, 100);
-        
     } catch (err) {
         alert("Failed to remove ignore pattern: " + err.message);
     }
@@ -1145,8 +1186,9 @@ async function loadSystemsStatus() {
                         <button class="btn btn-secondary" onclick="analyzeSystemLogsWithAI('${id}')" id="btn-system-ai-analyze-${id}" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; background-color: hsla(262, 85%, 65%, 0.1); border-color: hsla(262, 85%, 65%, 0.3); color: hsl(262, 85%, 65%); flex-grow: 1;">
                             <i class="fa-solid fa-brain"></i> Analyze Logs with AI
                         </button>
-                        <button class="btn btn-secondary" onclick="toggleSystemIgnorePatternUI('${id}')" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; flex-grow: 1;">
-                            <i class="fa-solid fa-filter-circle-xmark"></i> Mute Log Alert
+                        <button class="btn btn-secondary" onclick="toggleSystemIgnorePatternUI('${id}')" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; flex-grow: 1; display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem;">
+                            <i class="fa-solid fa-filter"></i> Filters
+                            ${ignorePatterns.length > 0 ? `<span style="background: hsl(210, 90%, 55%); color: white; border-radius: 999px; padding: 0.05rem 0.45rem; font-size: 0.65rem; font-weight: 700;">${ignorePatterns.length}</span>` : ''}
                         </button>
                         <button class="btn btn-secondary" onclick="clearSystemStatus('${id}')" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; flex-grow: 1; border-color: var(--border-card);">
                             <i class="fa-solid fa-circle-check"></i> Clear Status
@@ -1154,18 +1196,34 @@ async function loadSystemsStatus() {
                     </div>
                     
                     <!-- Ignore Pattern Form -->
-                    <div id="system-ignore-pattern-ui-${id}" style="display: none; flex-direction: column; gap: 0.5rem; border: 1px dashed var(--border-card); padding: 0.75rem; border-radius: 6px; background-color: hsla(220, 15%, 15%, 0.2); margin-top: 0.5rem; width: 100%;">
-                        <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-primary); text-align: left;">Mute alerts for matching strings (case-insensitive):</div>
-                        <div style="display: flex; gap: 0.5rem; width: 100%;">
-                            <input type="text" id="system-input-ignore-${id}" placeholder="e.g. hue bridge connection lost" style="flex-grow: 1; font-size: 0.75rem; padding: 0.4rem; background: var(--bg-body); border: 1px solid var(--border-card); border-radius: 4px; color: var(--text-primary);">
-                            <button class="btn btn-secondary" onclick="addSystemIgnorePattern('${id}')" style="font-size: 0.75rem; padding: 0.4rem 0.75rem; background: var(--color-success); border: none; color: white;">Add</button>
+                    <div id="system-ignore-pattern-ui-${id}" style="display: ${openSystemFilterPanels.has(id) ? 'flex' : 'none'}; flex-direction: column; gap: 0.5rem; border: 1px dashed var(--border-card); padding: 0.75rem; border-radius: 6px; background-color: hsla(220, 15%, 15%, 0.3); margin-top: 0.5rem; width: 100%;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                            <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-primary); text-align: left;">
+                                <i class="fa-solid fa-filter"></i> Ignore Log Patterns (${ignorePatterns.length})
+                            </div>
+                            ${id === 'home_assistant' ? `
+                            <button class="btn btn-secondary" onclick="applyRecommendedHaFilters('${id}')" style="font-size: 0.65rem; padding: 0.2rem 0.55rem; border-color: var(--border-card); display: inline-flex; align-items: center; gap: 0.25rem;">
+                                <i class="fa-solid fa-wand-magic-sparkles" style="color: hsl(45, 95%, 60%);"></i> Load HA Presets
+                            </button>` : ''}
                         </div>
-                        <div id="system-ignore-patterns-list-${id}" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.25rem; text-align: left; width: 100%;">
-                            ${ignorePatterns.length === 0 ? '<span style="font-size: 0.7rem; color: var(--text-muted);">No muted patterns yet.</span>' : 
+                        
+                        <div style="display: flex; gap: 0.5rem; width: 100%;">
+                            <input type="text" id="system-input-ignore-${id}" placeholder="Add pattern (e.g. pychromecast, dreame_vacuum)..." onkeydown="if(event.key === 'Enter') addSystemIgnorePattern('${id}')" style="flex-grow: 1; font-size: 0.75rem; padding: 0.45rem 0.6rem; background: var(--bg-body); border: 1px solid var(--border-card); border-radius: 4px; color: var(--text-primary);">
+                            <button class="btn btn-secondary" onclick="addSystemIgnorePattern('${id}')" style="font-size: 0.75rem; padding: 0.45rem 0.85rem; background: var(--color-success); border: none; color: white; display: inline-flex; align-items: center; gap: 0.3rem;">
+                                <i class="fa-solid fa-plus"></i> Add
+                            </button>
+                        </div>
+                        <div style="font-size: 0.68rem; color: var(--text-muted); text-align: left;">
+                            Case-insensitive match. Comma-separated allowed. Click <i class="fa-solid fa-pencil" style="font-size:0.65rem;"></i> to edit, <i class="fa-solid fa-xmark" style="font-size:0.65rem;"></i> to delete.
+                        </div>
+                        
+                        <div id="system-ignore-patterns-list-${id}" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.25rem; text-align: left; width: 100%; max-height: 180px; overflow-y: auto; padding-right: 0.25rem;">
+                            ${ignorePatterns.length === 0 ? '<span style="font-size: 0.72rem; color: var(--text-muted); font-style: italic;">No active filters. All errors and warnings will be reported.</span>' : 
                                 ignorePatterns.map(p => `
-                                    <span class="docker-badge" style="background-color: hsla(0, 0%, 20%, 0.6); color: var(--text-secondary); display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.7rem; border: 1px solid var(--border-card); padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: none;">
-                                        "${escapeHtml(p)}"
-                                        <i class="fa-solid fa-xmark" onclick="removeSystemIgnorePattern('${id}', '${p}')" style="cursor: pointer; color: var(--color-failed); font-size: 0.75rem;"></i>
+                                    <span class="docker-badge" style="background-color: hsla(220, 15%, 22%, 0.7); color: var(--text-primary); display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; border: 1px solid var(--border-card); padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: none;">
+                                        <span style="font-family: monospace;">"${escapeHtml(p)}"</span>
+                                        <i class="fa-solid fa-pencil" onclick="editSystemIgnorePattern('${id}', '${escapeHtml(p).replace(/'/g, "\\'")}')" title="Edit filter pattern" style="cursor: pointer; color: var(--text-secondary); font-size: 0.7rem;"></i>
+                                        <i class="fa-solid fa-xmark" onclick="removeSystemIgnorePattern('${id}', '${escapeHtml(p).replace(/'/g, "\\'")}')" title="Remove filter" style="cursor: pointer; color: var(--color-failed); font-size: 0.75rem;"></i>
                                     </span>
                                 `).join('')
                             }
@@ -1261,7 +1319,15 @@ async function clearSystemStatus(systemId) {
 function toggleSystemIgnorePatternUI(systemId) {
     const el = document.getElementById(`system-ignore-pattern-ui-${systemId}`);
     if (el) {
-        el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+        if (el.style.display === 'none') {
+            el.style.display = 'flex';
+            openSystemFilterPanels.add(systemId);
+            const input = document.getElementById(`system-input-ignore-${systemId}`);
+            if (input) input.focus();
+        } else {
+            el.style.display = 'none';
+            openSystemFilterPanels.delete(systemId);
+        }
     }
 }
 
@@ -1279,11 +1345,43 @@ async function addSystemIgnorePattern(systemId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pattern })
         });
-        if (!res.ok) throw new Error('Failed to add ignore pattern');
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || 'Failed to add ignore pattern');
+        }
         input.value = '';
+        openSystemFilterPanels.add(systemId);
         await loadSystemsStatus();
     } catch(err) {
         alert("Error adding ignore pattern: " + err.message);
+    }
+}
+
+// Edit System Ignore Pattern
+async function editSystemIgnorePattern(systemId, oldPattern) {
+    const newPattern = prompt(`Edit filter pattern:`, oldPattern);
+    if (newPattern === null) return;
+    const trimmed = newPattern.trim().toLowerCase();
+    if (!trimmed) {
+        alert("Filter pattern cannot be empty.");
+        return;
+    }
+    if (trimmed === oldPattern.toLowerCase()) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/systems/${systemId}/ignore`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_pattern: oldPattern, new_pattern: trimmed })
+        });
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || 'Failed to edit ignore pattern');
+        }
+        openSystemFilterPanels.add(systemId);
+        await loadSystemsStatus();
+    } catch(err) {
+        alert("Error updating filter pattern: " + err.message);
     }
 }
 
@@ -1293,10 +1391,35 @@ async function removeSystemIgnorePattern(systemId, pattern) {
         const res = await fetch(`${API_BASE}/api/systems/${systemId}/ignore?pattern=${encodeURIComponent(pattern)}`, {
             method: 'DELETE'
         });
-        if (!res.ok) throw new Error('Failed to delete ignore pattern');
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || 'Failed to delete ignore pattern');
+        }
+        openSystemFilterPanels.add(systemId);
         await loadSystemsStatus();
     } catch(err) {
         alert("Error removing ignore pattern: " + err.message);
+    }
+}
+
+// Quick apply recommended HA filters
+async function applyRecommendedHaFilters(systemId) {
+    if (!confirm("Add recommended Home Assistant noise filters (Dreame, Chromecast, mobile notifications, weather, etc.)?")) return;
+    const preset = "dreame_vacuum,floor_direction_cleaning,kidde_homesafe,lennoxs30,pychromecast,webostv,sonos,aioesphomeapi,dlna_dmr,async_upnp_client,failed to cast media,mobile_app.notify,alexa.state_report,google_report_state,remotestate.nabucasa.com,snitun,google generative ai,google_generative_ai,spikes in demand are usually temporary,503 service unavailable,open_meteo,co2signal,met.coordinator,metno,rpi_power,uiprotect.events.dispatcher,already running,validate_setpoints";
+    try {
+        const res = await fetch(`${API_BASE}/api/systems/${systemId}/ignore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pattern: preset })
+        });
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || 'Failed to apply recommended filters');
+        }
+        openSystemFilterPanels.add(systemId);
+        await loadSystemsStatus();
+    } catch(err) {
+        alert("Error applying filters: " + err.message);
     }
 }
 
