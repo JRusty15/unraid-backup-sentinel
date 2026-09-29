@@ -1048,14 +1048,31 @@ async def probe_home_assistant():
         # Parse repairs / active issues
         issues = []
         for issue in ws_issues:
+            if issue.get("ignored", False):
+                continue
+                
             domain = issue.get("domain", "system")
+            issue_domain = issue.get("issue_domain", domain)
             issue_id = issue.get("issue_id", "")
-            title = issue_id.replace("_", " ").capitalize() if issue_id else "System issue"
             severity = issue.get("severity", "warning")
             desc = ""
             placeholders = issue.get("translation_placeholders")
             if placeholders and isinstance(placeholders, dict):
                 desc = ", ".join(f"{k}: {v}" for k, v in placeholders.items())
+                
+            # Clean human-readable title
+            trans_key = issue.get("translation_key", "")
+            if trans_key == "config_entry_reauth":
+                name_val = placeholders.get("name", "") if isinstance(placeholders, dict) else ""
+                title = f"Re-authenticate {issue_domain.title()}" + (f" ({name_val})" if name_val else "")
+            else:
+                title = issue_id.replace("_", " ").capitalize() if issue_id else "System issue"
+                
+            # Filter against ignore_patterns
+            issue_str = f"{domain} {issue_domain} {issue_id} {title} {desc}".lower()
+            if ignore_patterns and any(pat in issue_str for pat in ignore_patterns):
+                continue
+                
             issues.append({
                 "domain": domain,
                 "title": title,
