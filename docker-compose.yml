@@ -20,6 +20,8 @@ services:
     volumes:
       # --- UNRAID CONFIGURATION (Uncomment these on your Unraid Server) ---
       # - /var/log:/app/logs/syslog:ro
+      # - /var/local/emhttp:/var/local/emhttp:ro
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
       # - /mnt/user/appdata/duplicacy/logs:/app/logs/duplicacy:ro
       # - /mnt/user/appdata/unraid-backup-sentinel/logs:/app/logs/rsync:ro
       # - /mnt/user/appdata/unraid-backup-sentinel/data:/app/data

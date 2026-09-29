@@ -40,29 +40,21 @@ function switchTab(tabId) {
     const subtitleEl = document.getElementById('page-subtitle');
     
     if (tabId === 'dashboard') {
-        titleEl.textContent = 'Operational Overview';
-        subtitleEl.textContent = 'Real-time status of backups and storage array integrity.';
+        titleEl.textContent = 'Backups Dashboard';
+        subtitleEl.textContent = 'Real-time status of local rsync and offsite Duplicacy backups.';
         refreshDashboardData();
-    } else if (tabId === 'ai') {
-        titleEl.textContent = 'AI Sentinel Diagnostics';
-        subtitleEl.textContent = 'AI-driven analysis of storage arrays, file structures, and backup integrity.';
-        loadLatestAIAnalysis();
-    } else if (tabId === 'syslog') {
-        titleEl.textContent = 'Logs & Syslog Inspector';
-        subtitleEl.textContent = 'Raw output streams from server syslogs and backup tasks.';
-        loadRawLogs();
-    } else if (tabId === 'tokens') {
-        titleEl.textContent = 'Gemini Cost & Usage';
-        subtitleEl.textContent = 'Financial auditing and token counts of AI engine operations.';
-        loadCostUsageData();
+    } else if (tabId === 'systems') {
+        titleEl.textContent = 'Systems Overview';
+        subtitleEl.textContent = 'Operational health, array integrity, hardware metrics, and AI diagnostics for all monitored servers.';
+        loadSystemsStatus();
     } else if (tabId === 'docker') {
         titleEl.textContent = 'Docker Services';
         subtitleEl.textContent = 'Operational health, container states, and responsive checks.';
         loadDockerStatus();
-    } else if (tabId === 'systems') {
-        titleEl.textContent = 'Remote Systems';
-        subtitleEl.textContent = 'Operational health, hardware utilization, and core system logs of remote servers.';
-        loadSystemsStatus();
+    } else if (tabId === 'tokens') {
+        titleEl.textContent = 'Gemini Cost & Usage';
+        subtitleEl.textContent = 'Financial auditing and token counts of AI engine operations.';
+        loadCostUsageData();
     } else if (tabId === 'settings') {
         titleEl.textContent = 'System Settings';
         subtitleEl.textContent = 'Integration aids and database maintenance controls.';
@@ -974,7 +966,11 @@ async function loadSystemsStatus() {
         
         let latestTime = null;
         let systemsPageHealth = 'healthy';
-        data.sort((a, b) => a.name.localeCompare(b.name));
+        data.sort((a, b) => {
+            if (a.id === 'unraid') return -1;
+            if (b.id === 'unraid') return 1;
+            return a.name.localeCompare(b.name);
+        });
         
         data.forEach(system => {
             const id = system.id;
@@ -1024,6 +1020,8 @@ async function loadSystemsStatus() {
             
             if (id === 'home_assistant') {
                 iconClass = 'fa-solid fa-house-laptop';
+            } else if (id === 'unraid') {
+                iconClass = 'fa-solid fa-server';
             }
             
             if (status === 'healthy') {
@@ -1031,15 +1029,12 @@ async function loadSystemsStatus() {
                 iconColor = 'var(--color-success)';
             } else if (status === 'critical') {
                 statusClass = 'failed';
-                iconClass = 'fa-solid fa-triangle-exclamation';
                 iconColor = 'var(--color-failed)';
             } else if (status === 'warning') {
                 statusClass = 'warning';
-                iconClass = 'fa-solid fa-circle-exclamation';
                 iconColor = 'var(--color-warning)';
             }
             
-            const offset = (statusClass === 'unknown') ? '314' : '0';
             const card = document.createElement('div');
             card.className = 'card status-card docker-card'; // Reuse styled docker-card layout
             card.id = `system-card-${id}`;
@@ -1078,7 +1073,7 @@ async function loadSystemsStatus() {
                         ${metrics.disk !== null && metrics.disk !== undefined ? `
                             <div style="background: hsla(220,15%,15%,0.3); padding: 0.6rem 0.8rem; border-radius: 8px; border: 1px solid var(--border-card);">
                                 <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.25rem;">
-                                    <span>Disk Space</span>
+                                    <span>${id === 'unraid' ? 'Array Storage' : 'Disk Space'}</span>
                                     <span style="font-weight:600; color:var(--text-primary);">${metrics.disk}${metrics.disk_unit || '%'}</span>
                                 </div>
                                 <div style="width:100%; height:6px; background:hsla(0,0%,100%,0.08); border-radius:3px; overflow:hidden;">
@@ -1150,6 +1145,7 @@ async function loadSystemsStatus() {
                 <div class="docker-card-summary" onclick="toggleDockerCardExpand('${id}')">
                     <div class="docker-card-title-group">
                         <span class="status-indicator-dot ${statusClass}"></span>
+                        <i class="${iconClass}" style="margin-right: 0.4rem; color: ${iconColor};"></i>
                         <h4 class="docker-card-title">${escapeHtml(name)}</h4>
                     </div>
                     <i class="fa-solid fa-chevron-down expand-chevron"></i>
@@ -1159,8 +1155,11 @@ async function loadSystemsStatus() {
                     <div class="docker-status-header" style="border: none; padding: 0;">
                         <div class="docker-badges" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                             <span class="docker-badge ${statusClass === 'success' ? 'running' : statusClass}">${escapeHtml(status)}</span>
-                            ${metadata.core_version ? `<span class="docker-badge" style="background: hsla(220,15%,20%,0.6); color: var(--text-secondary); text-transform:none; border:1px solid var(--border-card);">Core: v${escapeHtml(metadata.core_version)}</span>` : ''}
-                            ${metadata.os_version ? `<span class="docker-badge" style="background: hsla(220,15%,20%,0.6); color: var(--text-secondary); text-transform:none; border:1px solid var(--border-card);">OS: v${escapeHtml(metadata.os_version)}</span>` : ''}
+                            ${id === 'unraid' && metadata.os_version && metadata.os_version !== 'Unknown' ? `<span class="docker-badge" style="background: hsla(220,15%,20%,0.6); color: var(--text-secondary); text-transform:none; border:1px solid var(--border-card);">Unraid OS: v${escapeHtml(metadata.os_version)}</span>` : ''}
+                            ${id === 'unraid' && metadata.array_state && metadata.array_state !== 'Unknown' ? `<span class="docker-badge" style="background: hsla(140,40%,20%,0.6); color: var(--color-success); text-transform:none; border:1px solid var(--border-card);">Array: ${escapeHtml(metadata.array_state)}</span>` : ''}
+                            ${id === 'unraid' && metadata.num_disks ? `<span class="docker-badge" style="background: hsla(220,15%,20%,0.6); color: var(--text-secondary); text-transform:none; border:1px solid var(--border-card);">Disks: ${escapeHtml(metadata.num_disks)} Active</span>` : ''}
+                            ${id === 'home_assistant' && metadata.core_version ? `<span class="docker-badge" style="background: hsla(220,15%,20%,0.6); color: var(--text-secondary); text-transform:none; border:1px solid var(--border-card);">Core: v${escapeHtml(metadata.core_version)}</span>` : ''}
+                            ${id === 'home_assistant' && metadata.os_version ? `<span class="docker-badge" style="background: hsla(220,15%,20%,0.6); color: var(--text-secondary); text-transform:none; border:1px solid var(--border-card);">OS: v${escapeHtml(metadata.os_version)}</span>` : ''}
                         </div>
                     </div>
                     
@@ -1201,14 +1200,20 @@ async function loadSystemsStatus() {
                             <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-primary); text-align: left;">
                                 <i class="fa-solid fa-filter"></i> Ignore Log Patterns (${ignorePatterns.length})
                             </div>
-                            ${id === 'home_assistant' ? `
-                            <button class="btn btn-secondary" onclick="applyRecommendedHaFilters('${id}')" style="font-size: 0.65rem; padding: 0.2rem 0.55rem; border-color: var(--border-card); display: inline-flex; align-items: center; gap: 0.25rem;">
-                                <i class="fa-solid fa-wand-magic-sparkles" style="color: hsl(45, 95%, 60%);"></i> Load HA Presets
-                            </button>` : ''}
+                            <div style="display: flex; gap: 0.4rem;">
+                                ${id === 'home_assistant' ? `
+                                <button class="btn btn-secondary" onclick="applyRecommendedHaFilters('${id}')" style="font-size: 0.65rem; padding: 0.2rem 0.55rem; border-color: var(--border-card); display: inline-flex; align-items: center; gap: 0.25rem;">
+                                    <i class="fa-solid fa-wand-magic-sparkles" style="color: hsl(45, 95%, 60%);"></i> Load HA Presets
+                                </button>` : ''}
+                                ${id === 'unraid' ? `
+                                <button class="btn btn-secondary" onclick="applyRecommendedUnraidFilters('${id}')" style="font-size: 0.65rem; padding: 0.2rem 0.55rem; border-color: var(--border-card); display: inline-flex; align-items: center; gap: 0.25rem;">
+                                    <i class="fa-solid fa-wand-magic-sparkles" style="color: hsl(45, 95%, 60%);"></i> Load Unraid Presets
+                                </button>` : ''}
+                            </div>
                         </div>
                         
                         <div style="display: flex; gap: 0.5rem; width: 100%;">
-                            <input type="text" id="system-input-ignore-${id}" placeholder="Add pattern (e.g. pychromecast, dreame_vacuum)..." onkeydown="if(event.key === 'Enter') addSystemIgnorePattern('${id}')" style="flex-grow: 1; font-size: 0.75rem; padding: 0.45rem 0.6rem; background: var(--bg-body); border: 1px solid var(--border-card); border-radius: 4px; color: var(--text-primary);">
+                            <input type="text" id="system-input-ignore-${id}" placeholder="${id === 'unraid' ? 'Add pattern (e.g. ntp, smbd, mover, sshd)...' : 'Add pattern (e.g. pychromecast, dreame_vacuum)...'}" onkeydown="if(event.key === 'Enter') addSystemIgnorePattern('${id}')" style="flex-grow: 1; font-size: 0.75rem; padding: 0.45rem 0.6rem; background: var(--bg-body); border: 1px solid var(--border-card); border-radius: 4px; color: var(--text-primary);">
                             <button class="btn btn-secondary" onclick="addSystemIgnorePattern('${id}')" style="font-size: 0.75rem; padding: 0.45rem 0.85rem; background: var(--color-success); border: none; color: white; display: inline-flex; align-items: center; gap: 0.3rem;">
                                 <i class="fa-solid fa-plus"></i> Add
                             </button>
@@ -1267,17 +1272,20 @@ async function triggerSystemsProbe() {
     if (!btn) return;
     
     btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking...';
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking All...';
     
     try {
-        await fetch(`${API_BASE}/api/systems/home_assistant/probe`, { method: 'POST' });
+        await Promise.allSettled([
+            fetch(`${API_BASE}/api/systems/unraid/probe`, { method: 'POST' }),
+            fetch(`${API_BASE}/api/systems/home_assistant/probe`, { method: 'POST' })
+        ]);
         setTimeout(async () => {
             await loadSystemsStatus();
             btn.disabled = false;
             btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Check All Now';
-        }, 3000);
+        }, 2000);
     } catch(err) {
-        alert("Failed to probe remote systems: " + err.message);
+        alert("Failed to probe systems: " + err.message);
         btn.disabled = false;
         btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Check All Now';
     }
@@ -1420,6 +1428,27 @@ async function applyRecommendedHaFilters(systemId) {
         await loadSystemsStatus();
     } catch(err) {
         alert("Error applying filters: " + err.message);
+    }
+}
+
+// Quick apply recommended Unraid syslog filters
+async function applyRecommendedUnraidFilters(systemId) {
+    if (!confirm("Add recommended Unraid noise filters (NTP, Samba, Avahi, Cron, benign USB/kernel notices)?")) return;
+    const preset = "ntp,samba,smbd,avahi-daemon,cron,emhttpd: error: send,kernel: usb,dhcp,read error from remote host";
+    try {
+        const res = await fetch(`${API_BASE}/api/systems/${systemId}/ignore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pattern: preset })
+        });
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || 'Failed to apply recommended filters');
+        }
+        openSystemFilterPanels.add(systemId);
+        await loadSystemsStatus();
+    } catch(err) {
+        alert("Error applying Unraid filters: " + err.message);
     }
 }
 

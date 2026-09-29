@@ -3,6 +3,9 @@ import sqlite3
 import datetime
 import asyncio
 import logging
+import json
+import glob
+import shutil
 from typing import Optional, List, Dict
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +35,11 @@ PORT = int(os.getenv("PORT", "8080"))
 # Heartbeat configuration (stale warning time in hours)
 HEARTBEAT_RSYNC_HOURS = int(os.getenv("HEARTBEAT_RSYNC_HOURS", "26"))
 HEARTBEAT_DUPLICACY_HOURS = int(os.getenv("HEARTBEAT_DUPLICACY_HOURS", "240"))
+
+# Unraid Server configuration
+UNRAID_HOST = os.getenv("UNRAID_HOST", "10.0.0.54")
+UNRAID_NAME = os.getenv("UNRAID_NAME", "Unraid NAS")
+EMHTTP_PATH = os.getenv("EMHTTP_PATH", "/var/local/emhttp")
 
 # Home Assistant configuration
 HA_URL = os.getenv("HA_URL", "")
@@ -225,6 +233,28 @@ def init_db():
                     "{}",
                     "Waiting for first probe...",
                     ""
+                )
+            )
+
+        # Populate initial Unraid system monitor if it doesn't exist
+        cursor = conn.execute("SELECT 1 FROM system_monitors WHERE id = ?", ("unraid",))
+        if not cursor.fetchone():
+            conn.execute(
+                """
+                INSERT INTO system_monitors (id, name, type, status, last_run, metrics, metadata, message, log_snippet, ignore_patterns)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "unraid",
+                    UNRAID_NAME,
+                    "unraid",
+                    "unknown",
+                    None,
+                    "{}",
+                    "{}",
+                    "Waiting for first probe...",
+                    "",
+                    "ntp, samba, smbd, avahi-daemon, cron, emhttpd: error: send, kernel: usb, dhcp, read error from remote host"
                 )
             )
             
@@ -896,6 +926,261 @@ async def send_ha_error_notification(new_errors: List[str]):
     await post_to_discord(payload)
 
 
+async def probe_unraid_server():
+    logger.info("Probing Unraid server...")
+    try:
+        metrics = {
+            "cpu": None,
+            "ram": None,
+            "disk": None,
+            "cpu_temp": None,
+            "cpu_unit": "%",
+            "ram_unit": "%",
+            "disk_unit": "%",
+            "cpu_temp_unit": "°C"
+        }
+        metadata = {
+            "os_version": "Unknown",
+            "server_name": UNRAID_NAME,
+            "array_state": "Unknown",
+            "num_disks": None,
+            "sync_errors": 0,
+            "issues": []
+        }
+
+        # 1. Parse var.ini if available
+        var_ini_paths = [
+            os.path.join(EMHTTP_PATH, "var.ini"),
+            "/var/local/emhttp/var.ini",
+            "/app/emhttp/var.ini"
+        ]
+        var_ini_file = next((p for p in var_ini_paths if os.path.exists(p)), None)
+        if var_ini_file:
+            try:
+                with open(var_ini_file, "r", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if "=" in line:
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip('"')
+                            if k == "NAME" and v:
+                                metadata["server_name"] = v
+                            elif k == "version" and v:
+                                metadata["os_version"] = v
+                            elif k == "mdState" and v:
+                                metadata["array_state"] = v
+                            elif k == "mdNumDisks" and v:
+                                try:
+                                    metadata["num_disks"] = int(v)
+                                except ValueError:
+                                    pass
+                            elif k == "sbSyncErrs" and v:
+                                try:
+                                    metadata["sync_errors"] = int(v)
+                                except ValueError:
+                                    pass
+            except Exception as e:
+                logger.warning("Error parsing var.ini: %s", e)
+
+        # 2. Parse disks.ini if available
+        disks_ini_paths = [
+            os.path.join(EMHTTP_PATH, "disks.ini"),
+            "/var/local/emhttp/disks.ini",
+            "/app/emhttp/disks.ini"
+        ]
+        disks_ini_file = next((p for p in disks_ini_paths if os.path.exists(p)), None)
+        if disks_ini_file:
+            try:
+                current_disk = None
+                disk_errors = []
+                disk_temps = []
+                with open(disks_ini_file, "r", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith('["') and line.endswith('"]'):
+                            current_disk = line[2:-2]
+                        elif "=" in line and current_disk:
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip('"')
+                            if k == "status" and v not in ["DISK_OK", "DISK_NP"]:
+                                disk_errors.append(f"Disk '{current_disk}' status: {v}")
+                            elif k == "numErrors":
+                                try:
+                                    err_cnt = int(v)
+                                    if err_cnt > 0:
+                                        disk_errors.append(f"Disk '{current_disk}' errors: {err_cnt}")
+                                except ValueError:
+                                    pass
+                            elif k == "temp" and v and v != "*":
+                                try:
+                                    disk_temps.append(float(v))
+                                except ValueError:
+                                    pass
+                if disk_errors:
+                    for de in disk_errors:
+                        metadata["issues"].append({
+                            "title": "Disk Warning",
+                            "description": de,
+                            "severity": "critical",
+                            "domain": "storage"
+                        })
+                if disk_temps and metrics["cpu_temp"] is None:
+                    metrics["cpu_temp"] = round(sum(disk_temps) / len(disk_temps), 1)
+            except Exception as e:
+                logger.warning("Error parsing disks.ini: %s", e)
+
+        # 3. Host RAM from /proc/meminfo
+        try:
+            mem = {}
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    parts = line.split(":")
+                    if len(parts) == 2:
+                        k = parts[0].strip()
+                        v = parts[1].strip().split()[0]
+                        mem[k] = float(v)
+            if "MemTotal" in mem and "MemAvailable" in mem and mem["MemTotal"] > 0:
+                metrics["ram"] = round(((mem["MemTotal"] - mem["MemAvailable"]) / mem["MemTotal"]) * 100, 1)
+        except Exception as e:
+            logger.warning("Error reading /proc/meminfo: %s", e)
+
+        # 4. Host CPU from /proc/loadavg
+        try:
+            with open("/proc/loadavg", "r") as f:
+                load_1m = float(f.read().split()[0])
+                cores = os.cpu_count() or 1
+                metrics["cpu"] = min(100.0, round((load_1m / cores) * 100, 1))
+        except Exception as e:
+            logger.warning("Error reading /proc/loadavg: %s", e)
+
+        # 5. Host CPU Temp from /sys/class/hwmon
+        try:
+            temps = []
+            for p in glob.glob("/sys/class/hwmon/hwmon*/temp*_input") + glob.glob("/sys/class/thermal/thermal_zone*/temp"):
+                try:
+                    with open(p, "r") as fh:
+                        t = float(fh.read().strip())
+                        if t > 1000:
+                            t = t / 1000.0
+                        if 15.0 <= t <= 115.0:
+                            temps.append(t)
+                except Exception:
+                    continue
+            if temps:
+                metrics["cpu_temp"] = round(sorted(temps)[len(temps)//2], 1)
+        except Exception as e:
+            logger.warning("Error reading hwmon: %s", e)
+
+        # 6. Disk Space
+        try:
+            storage_path = "/app/data" if os.path.exists("/app/data") else "/"
+            total, used, free = shutil.disk_usage(storage_path)
+            if total > 0:
+                metrics["disk"] = round((used / total) * 100, 1)
+        except Exception as e:
+            logger.warning("Error reading disk usage: %s", e)
+
+        # 7. OS Version fallback
+        if metadata["os_version"] == "Unknown":
+            try:
+                with open("/proc/sys/kernel/osrelease", "r") as f:
+                    rel = f.read().strip()
+                    if "Unraid" in rel:
+                        metadata["os_version"] = rel.split("-")[0]
+            except Exception:
+                pass
+
+        # 8. Query ignore patterns for Unraid
+        ignore_patterns = []
+        try:
+            with get_db() as conn:
+                cursor = conn.execute("SELECT ignore_patterns FROM system_monitors WHERE id = ?", ("unraid",))
+                row = cursor.fetchone()
+                if row and row["ignore_patterns"]:
+                    ignore_patterns = [p.strip().lower() for p in row["ignore_patterns"].split(",") if p.strip()]
+        except Exception as pe:
+            logger.error("Failed to fetch Unraid ignore patterns: %s", pe)
+
+        # 9. Read and filter Syslog
+        syslog_data = get_syslog_last_24h()
+        syslog_lines = syslog_data.split("\n") if syslog_data else []
+        
+        keywords = ["error", "fail", "crit", "alert", "emerg", "fatal", "out of memory", "oom-killer", "sector", "ata", "btrfs", "xfs error", "unclean", "segfault", "hardware error", "mce"]
+        
+        flagged_lines = []
+        error_count = 0
+        warning_count = 0
+        
+        for line in syslog_lines:
+            lower = line.lower()
+            if any(kw in lower for kw in keywords):
+                if ignore_patterns and any(pat in lower for pat in ignore_patterns):
+                    continue
+                if any(ck in lower for ck in ["crit", "emerg", "fatal", "oom-killer", "sector", "segfault", "hardware error", "mce"]):
+                    error_count += 1
+                else:
+                    warning_count += 1
+                flagged_lines.append(line)
+
+        log_snippet = "\n".join(flagged_lines[-100:]) if flagged_lines else "No errors or warnings found in Unraid syslog."
+
+        # 10. Determine overall status and message
+        status = "healthy"
+        status_parts = []
+        
+        array_st = metadata.get("array_state", "Unknown")
+        if array_st in ["STARTED", "Started"]:
+            status_parts.append("Array Started")
+        elif array_st != "Unknown":
+            status = "warning"
+            status_parts.append(f"Array {array_st}")
+            
+        num_disks = metadata.get("num_disks")
+        if num_disks:
+            status_parts.append(f"{num_disks} Disks")
+
+        if metadata.get("issues"):
+            status = "critical"
+            status_parts.append(f"{len(metadata['issues'])} Active Disk Issue(s)")
+        elif error_count > 0:
+            status = "critical" if error_count >= 3 else "warning"
+            status_parts.append(f"{error_count} Syslog Error(s)")
+        elif warning_count > 0:
+            status = "warning"
+            status_parts.append(f"{warning_count} Warning(s)")
+        else:
+            status_parts.append("Syslog Clean")
+
+        message = " • ".join(status_parts) if status_parts else "Operational"
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        # Update DB
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE system_monitors
+                SET name = ?, status = ?, last_run = ?, metrics = ?, metadata = ?, message = ?, log_snippet = ?
+                WHERE id = ?
+                """,
+                (
+                    metadata.get("server_name") or UNRAID_NAME,
+                    status,
+                    timestamp,
+                    json.dumps(metrics),
+                    json.dumps(metadata),
+                    message,
+                    log_snippet,
+                    "unraid"
+                )
+            )
+            conn.commit()
+        logger.info("Unraid probe complete. Status: %s - %s", status, message)
+    except Exception as e:
+        logger.error("Failed to probe Unraid server: %s", e)
+
+
 async def probe_home_assistant():
     logger.info("Probing Home Assistant...")
     if not HA_URL or not HA_TOKEN:
@@ -1447,10 +1732,11 @@ async def start_docker_prober_loop():
         await asyncio.sleep(900)
 
 async def start_systems_prober_loop():
-    logger.info("Starting Remote Systems prober loop...")
+    logger.info("Starting Systems prober loop...")
     await asyncio.sleep(15)
     while True:
         try:
+            await probe_unraid_server()
             await probe_home_assistant()
         except Exception as e:
             logger.error("Error in Systems prober loop: %s", e)
@@ -1675,6 +1961,9 @@ async def trigger_system_probe(system_id: str, background_tasks: BackgroundTasks
     if system_id == "home_assistant":
         background_tasks.add_task(probe_home_assistant)
         return {"message": "Home Assistant probe triggered in background."}
+    elif system_id == "unraid":
+        background_tasks.add_task(probe_unraid_server)
+        return {"message": "Unraid probe triggered in background."}
     else:
         raise HTTPException(status_code=404, detail="System not found.")
 
@@ -2041,8 +2330,53 @@ def analyze_system_logs(system_id: str):
         logs = s["log_snippet"] or "No logs available."
         status = s["status"]
         message = s["message"]
-        
-        prompt = f"""
+        metrics_raw = s.get("metrics") or "{}"
+        metadata_raw = s.get("metadata") or "{}"
+        try:
+            metrics_dict = json.loads(metrics_raw) if isinstance(metrics_raw, str) else metrics_raw
+        except Exception:
+            metrics_dict = {}
+        try:
+            metadata_dict = json.loads(metadata_raw) if isinstance(metadata_raw, str) else metadata_raw
+        except Exception:
+            metadata_dict = {}
+
+        if system_id == "unraid":
+            prompt = f"""
+You are an expert Unraid server administrator and Linux storage engineer for the Sentinel Node.
+Analyze the following health status, hardware metrics, array state, and syslog events for the server: '{name}'.
+
+Current Health Status: {status}
+Summary Message: {message}
+
+System & Storage Metrics:
+- CPU Utilization: {metrics_dict.get('cpu', 'N/A')}%
+- Memory Usage: {metrics_dict.get('ram', 'N/A')}%
+- Storage / Array Utilization: {metrics_dict.get('disk', 'N/A')}%
+- CPU Temperature: {metrics_dict.get('cpu_temp', 'N/A')}°C
+- Unraid OS: {metadata_dict.get('os_version', 'N/A')}
+- Array State: {metadata_dict.get('array_state', 'N/A')} ({metadata_dict.get('num_disks', 'N/A')} disks)
+- Sync Errors: {metadata_dict.get('sync_errors', 0)}
+
+Filtered Syslog Errors and Warnings:
+```
+{logs}
+```
+
+Please provide a concise, high-impact assessment in clean Markdown:
+1. ### Health & Array Assessment
+A short summary of current server state, array health, and whether storage is safe.
+2. ### Syslog Diagnostics
+Explain in clear, practical terms what the flagged log events mean (e.g. disk sector health, timeouts, driver notices, SSH sessions, or file system mover operations).
+3. ### Actionable Recommendations
+2-3 specific steps to troubleshoot or resolve the issue, or reassurance if all items are routine/benign.
+4. ### Suggested Ignore Filter
+Suggest 1-2 exact keyword(s) from the log output that the user can add to their Unraid ignore filters if this is harmless recurring noise.
+
+Keep the tone expert, concise, and reassuring. Avoid long intros or conversational filler.
+"""
+        else:
+            prompt = f"""
 You are the AI DevOps assistant for the Unraid Backup & Log Sentinel.
 Analyze the following status and log output for the Remote System: '{name}' (System ID: '{system_id}').
 
@@ -2103,6 +2437,8 @@ def add_system_ignore_pattern(system_id: str, payload: IgnorePatternRequest, bac
             
         if system_id == "home_assistant":
             background_tasks.add_task(probe_home_assistant)
+        elif system_id == "unraid":
+            background_tasks.add_task(probe_unraid_server)
             
         logger.info("Added ignore patterns %s to system '%s'.", new_patterns, system_id)
         return {"message": "Successfully added ignore pattern(s)."}
@@ -2146,6 +2482,8 @@ def edit_system_ignore_pattern(system_id: str, payload: EditIgnorePatternRequest
                 conn.commit()
                 if system_id == "home_assistant":
                     background_tasks.add_task(probe_home_assistant)
+                elif system_id == "unraid":
+                    background_tasks.add_task(probe_unraid_server)
                 logger.info("Edited ignore pattern in system '%s' from '%s' to '%s'.", system_id, old_p, new_p)
                 return {"message": f"Successfully updated pattern to '{new_p}'."}
             else:
@@ -2178,6 +2516,8 @@ def delete_system_ignore_pattern(system_id: str, pattern: str, background_tasks:
                 conn.commit()
                 if system_id == "home_assistant":
                     background_tasks.add_task(probe_home_assistant)
+                elif system_id == "unraid":
+                    background_tasks.add_task(probe_unraid_server)
                 logger.info("Deleted ignore pattern '%s' from system '%s'.", target_pattern, system_id)
                 return {"message": f"Successfully removed ignore pattern '{target_pattern}'."}
             else:
